@@ -22,5 +22,3 @@ https://psychopy.org/api/hardware/pylink.html
 1. open the project's directory in the command line, 
 2. activate the poetry environment: `poetry shell`
 3. install pylink with pip:  `pip install --index-url=https://pypi.sr-support.com sr-research-pylink`
-
-
