@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "abstract-reasoning-anns"
+name = "experiment1-ANNs"
 version = "0.1.0"
 description = ""
 authors = ["chris-pinier <c.pinier@uva.nl>"]
