@@ -1,0 +1,80 @@
+body,
+html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: lightgrey;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.row {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.row.images img {
+    opacity: 0;
+    /* Initially hide images */
+    /* transition: opacity 0.5s; */
+    /* Smooth transition for opacity change */
+}
+
+/* Ensure the welcome message is styled as needed, potentially already handled */
+#middle-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#mid-row-text {
+    white-space: pre-wrap;
+    /* `pre` will also work if you don't need word wrapping */
+}
+
+.images img {
+    margin: 0 10px;
+    /* Adjusts spacing between images */
+}
+
+.center p {
+    text-align: center;
+    margin: 0;
+    font-size: 48px;
+    /* Adjusts the size of the "+" symbol */
+}
+
+/* Ensuring images and "+" symbol are centered */
+.images,
+.center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* flex-wrap: wrap;
+    Allows images to wrap if not enough space */
+}
+
+/* Additional styling to ensure images fit well within their containers */
+.images img {
+    max-height: 80%;
+    /* Adjusts image height to fit within the row */
+    max-width: 100%;
+    /* Ensures image does not exceed its container's width */
+}
+
+.correct-selection {
+    border: 3px solid green;
+}
+
+.incorrect-selection {
+    border: 3px solid red;
+}

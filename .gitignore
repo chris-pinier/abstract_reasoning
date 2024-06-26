@@ -39,19 +39,19 @@ local/logs/*
 
 local/website/*
 # * ######## Online ########
-online/draft/*
+experiment-Online/draft/*
 !online/draft/.gitkeep
 
-online/config/*
+experiment-Online/config/*
 !online/config/.gitkeep
 
-online/images/*
+experiment-Online/images/*
 !online/images/.gitkeep
 
-online/results/*
+experiment-Online/results/*
 !online/results/.gitkeep
 
-online/logs/*
+experiment-Online/logs/*
 !online/logs/.gitkeep
 
 # * ###### Other ########
