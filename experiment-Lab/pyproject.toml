@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "experiment1-lab"
+name = "CP-experiment1-lab"
 version = "0.1.0"
 description = ""
 authors = ["c.pinier@uva.nl"]

@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "experiment1-ANNs"
+name = "CP-experiment1-ANNs"
 version = "0.1.0"
 description = ""
 authors = ["chris-pinier <c.pinier@uva.nl>"]
