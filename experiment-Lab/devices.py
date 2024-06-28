@@ -1,6 +1,6 @@
 from icecream import ic
 from psychopy import parallel, core
-from local_utils import disable_decorator
+from utils import disable_decorator
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
@@ -418,30 +418,3 @@ class EyeTracker:
             print(f"EDF data file converted to ASCII format: {asc_file}")
         else:
             print("ERROR: Conversion failed")
-
-
-class Test:
-    def __init__(self):
-        self.device = "test_device"
-        self.connect()
-
-    def connect(self):
-        print("Connected to test device")
-
-
-test = Test()
-
-
-class Test2(Test):
-    def __init__(self, verbose=False):
-        super().__init__()
-        self.verbose = verbose
-
-    def disconnect(self):
-        print("Disconnected from test device")
-
-
-test2 = Test2()
-
-dir(test)
-dir(test2)

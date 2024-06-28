@@ -1,10 +1,9 @@
 from pathlib import Path
 import sys
 import time
-
-# import pylink
+import pylink
 import os
-from psychopy import visual, core, event, data, logging, monitors, gui, parallel
+from psychopy import visual, core, event, logging, monitors, gui
 from string import ascii_letters, digits
 import sys
 import json
@@ -21,12 +20,10 @@ from collections import namedtuple
 from tqdm.auto import tqdm
 import code
 
-
 wd = Path(__file__).parent
 os.chdir(wd)
-from local_utils import sess_prep2, get_monitors_info
-
-# from devices import EEGcap, EyeTracker
+from utils import sess_prep2, get_monitors_info
+from devices import EEGcap, EyeTracker
 
 comments_desc = {
     "! TEMP": "signals a temporary change that should be reverted later",
@@ -55,8 +52,8 @@ wd = Path(__file__).parent
 results_dir = wd / "results"
 results_dir.mkdir(exist_ok=True)
 
-config_dir = wd.parent / "global_config"
-img_dir = wd.parent / "global_config/images/resized"
+config_dir = wd.parent / "config"
+img_dir = config_dir / "images/resized"
 
 # * Load experiment config
 with open(config_dir / "experiment_config.json") as f:
@@ -95,7 +92,7 @@ def win_flip(win, cursor=False, bg_color=(0, 0, 0)):
 def display_images_sequentially(
     win,
     images,
-    fix_cross,
+    # fix_cross,
     eeg_device,
     eye_tracker,
     event_name,
@@ -103,7 +100,9 @@ def display_images_sequentially(
     pres_frames=None,
     order=None,
 ):
-    assert bool(pres_duration) ^ bool(pres_frames)  # TODO: consider removing this
+    assert bool(pres_duration) ^ bool(
+        pres_frames
+    ), "You can only specify pres_duration or pres_frames, not both"
 
     # stim_pres_times = {}
 
@@ -113,7 +112,7 @@ def display_images_sequentially(
     if pres_duration:
         for img_idx in order:
             images[img_idx].draw()
-            fix_cross.draw()
+            # fix_cross.draw()
             win_flip(win)
 
             eeg_device.send(event_name)
@@ -125,7 +124,7 @@ def display_images_sequentially(
         for img_idx in order:
             for _ in range(pres_frames):
                 images[img_idx].draw()
-                fix_cross.draw()
+                # fix_cross.draw()
                 win_flip(win)
                 eeg_device.send(event_name)
                 eye_tracker.send(event_name)
@@ -183,7 +182,7 @@ def end_block(win, blockN=None, keys=None):
 
 def sess_prep(
     images: Dict[str, str],
-    shapes: List[str],
+    icons: List[str],
     sequences: pd.DataFrame,
     allowed_keys: List[str],
     window_size: List[int],
@@ -195,7 +194,7 @@ def sess_prep(
 
     solution_mask = "question-mark"
 
-    img_size = Image.open(images[shapes[0]]).size
+    img_size = Image.open(images[icons[0]]).size
     x_positions = {}
     resp_mapping = {}
 
@@ -255,10 +254,14 @@ def sess_prep(
     return new_sequences, x_positions, resp_mapping
 
 
-def show_msg(win, text, txt_color=None, scn_width=None, keys: list = None):
+def show_msg(
+    win: visual.window.Window, text: str, kwargs: dict = None, keys: list = None
+):
     """Show message on psychopy window"""
     # win_flip(win)
-    msg = visual.TextStim(win, text)  # TODO : color=txt_color, wrapWidth=scn_width / 2)
+    kwargs = {} if kwargs is None else kwargs
+    msg = visual.TextStim(win, text, **kwargs)
+    # TODO : color=txt_color, wrapWidth=scn_width / 2)
     msg.draw()
     win.flip()
 
@@ -297,6 +300,8 @@ def show_dialogue():
             initial="monocular",
         )
         dlg.addField("eye", "Eye tracked:", choices=["left", "right", "both"])
+        dlg.addField(key="eye_screen_dist", label="Eye to Screen Distance (cm):")
+
         # ! IMPLEMENT: validate fields -> subj_id should be required
 
         # show dialog and wait for OK or Cancel
@@ -357,10 +362,35 @@ def terminate_task(win, eeg_device, eye_tracker, session_folder: str, edf_file: 
     # Download the EDF data file from the Host PC to a local data folder
     # parameters: source_file_on_the_host, destination_file_on_local_drive
 
-    # close the PsychoPy window
+    # TODO Implement commented logic below
+    # # * ################ SAVE DATA ################
+    # fname = f"subj_{subj_id}-sess_{sess_id}"
+    # fpath = session_dir / f"{fname}.csv"
+    # print(f"Exporting results to {fpath} ...")
+
+    # pd.DataFrame(sessData).T.to_csv(fpath)
+
+    # # * ################ END OF EXPERIMENT ################
+    # end_screen = visual.TextStim(
+    #     win,
+    #     text="End of experiment. Thank you for participating!",
+    #     # height=0.05 * window_size[1],
+    # )
+    # end_screen.draw()
+    # win_flip(win)
+    # core.wait(5)
+
+    # terminate_task(win, eeg, eye_tracker, session_dir, edf_file)
+
+    # eye_tracker.get_file(edf_file, session_dir)
+    # eye_tracker.edf2asc(str(session_dir / edf_file))
+
+    # code.interact(banner="Start", local=locals(), exitmsg="End")
+
+    # * close the PsychoPy window
     win.close()
 
-    # quit PsychoPy
+    # * quit PsychoPy
     core.quit()
     sys.exit()
 
@@ -393,40 +423,7 @@ def invert_dict(d: dict):
     return {v: k for k, v in d.items()}
 
 
-def main(results_dir, sequences_file):
-    # * ################ SETTING UP EXPERIMENT ################
-    # check_config() if config_check else None
-    # db = Database(exp_config['global']["database_path"])
-
-    allowed_keys_str = ", ".join(exp_config["local"]["allowed_keys"])
-
-    images = {img_path.stem: img_path for img_path in img_dir.iterdir()}
-    icon_names = list(images.keys())
-
-    img_size = Image.open(images[icon_names[0]]).size
-
-    sequences = pd.read_csv(sequences_file)
-    sequences = sequences.sample(frac=1, random_state=0)
-
-    # * Create a monitor object with your monitor's specifimcations
-    monitors_info = get_monitors_info()
-    my_monitor = [info for info in monitors_info if info["primary"] == True][0]
-    res_pixels = my_monitor["res"]
-    my_monitor = monitors.Monitor(name=my_monitor["name"])
-    # TODO: add width=..., distance=...
-    my_monitor.setSizePix(res_pixels)
-    window_size = res_pixels
-
-    assert int(window_size[1] / img_size[1]) > 3, "Window height too small"
-
-    new_sequences, x_positions, resp_mapping = sess_prep(
-        images=images,
-        shapes=icon_names,
-        sequences=sequences,
-        allowed_keys=exp_config["local"]["allowed_keys"],
-        window_size=window_size,
-    )
-
+def get_blocks(sequences: pd.DataFrame, block_size:int=20):        
     if (remainder := len(sequences) % block_size) != 0:
         n_blocks = (len(sequences) - remainder) / block_size
         blocks = np.array_split(sequences[:-remainder], n_blocks)
@@ -457,6 +454,43 @@ def main(results_dir, sequences_file):
 
     trial_blocks = (block for block in trial_blocks)
 
+
+def main(results_dir, sequences_file):
+    # * ################ SETTING UP EXPERIMENT ################
+    # check_config() if config_check else None
+    # db = Database(exp_config['global']["database_path"])
+
+    allowed_keys_str = ", ".join(exp_config["local"]["allowed_keys"])
+
+    images = {img_path.stem: img_path for img_path in img_dir.iterdir()}
+    icon_names = list(images.keys())
+
+    img_size = Image.open(images[icon_names[0]]).size
+
+    sequences = pd.read_csv(sequences_file)
+    sequences = sequences.sample(frac=1, random_state=0)
+
+    # * Create a monitor object with your monitor's specifimcations
+    monitors_info = get_monitors_info()
+    my_monitor = [info for info in monitors_info if info["primary"] == True][0]
+    res_pixels = my_monitor["res"]
+    my_monitor = monitors.Monitor(name=my_monitor["name"])
+    # TODO: add width=..., distance=...
+    my_monitor.setSizePix(res_pixels)
+    window_size = res_pixels
+
+    assert int(window_size[1] / img_size[1]) > 3, "Window height too small"
+
+    new_sequences, x_positions, resp_mapping = sess_prep(
+        images=images,
+        icons=icon_names,
+        sequences=sequences,
+        allowed_keys=exp_config["local"]["allowed_keys"],
+        window_size=window_size,
+    )
+
+    blocks = get_blocks(sequences, block_size)
+
     # * Create a window
     # ! { TEMP
     # window_size = [1080, 720]
@@ -471,7 +505,7 @@ def main(results_dir, sequences_file):
 
     # * ################ DIALOG BOX -> PARTICIPANT & SESSION NUMBER ################
     sessInfo = show_dialogue()
-    sessInfo["date"] = data.getDateStr()
+    sessInfo["date"] = get_timestamp()
 
     edf_fname = sessInfo["edf_fname"]
     edf_file = f"{edf_fname}.EDF"
@@ -638,7 +672,7 @@ def main(results_dir, sequences_file):
                 display_images_sequentially(
                     win=win,
                     images=sequence_imgs,
-                    fix_cross=fix_cross,
+                    # fix_cross=fix_cross,
                     eeg_device=eeg,
                     eye_tracker=eye_tracker,
                     event_name="stim-flash_sequence",
@@ -650,7 +684,7 @@ def main(results_dir, sequences_file):
                 display_images_sequentially(
                     win=win,
                     images=avail_choices_imgs,
-                    fix_cross=fix_cross,
+                    # fix_cross=fix_cross,
                     eeg_device=eeg,
                     eye_tracker=eye_tracker,
                     event_name="stim-flash_choices",
@@ -663,16 +697,15 @@ def main(results_dir, sequences_file):
                 # * Displaying all items + choices at once
                 for img in all_imgs:
                     img.draw()
-
                 win_flip(win)
+
                 eeg.send("stim-all_stim")
                 eye_tracker.send("stim-all_stim")
 
                 # * Start response clock
                 response_clock.reset()
-                choice_onset_time = (
-                    global_clock.getTime()
-                )  # * for safety / sanity check
+                # * for safety / sanity check
+                choice_onset_time = global_clock.getTime()
 
                 response = event.waitKeys(
                     timeStamped=response_clock,
@@ -721,16 +754,18 @@ def main(results_dir, sequences_file):
                     correct = "invalid"
                     choice = "invalid"
                     text = "Timeout"
-                    visual.TextStim(win, text=text).draw()
-                    win_flip(win)
+                    # visual.TextStim(win, text=text).draw()
+                    # win_flip(win)
+                    show_msg(win, text=text)
                     core.wait(timings.feedback_duration)
 
                 else:
                     correct = "invalid"
                     choice = "invalid"
                     text = f"Invalid key pressed, make sure to use these keys: {allowed_keys_str}"
-                    visual.TextStim(win, text=text).draw()
-                    win_flip(win)
+                    # visual.TextStim(win, text=text).draw()
+                    # win_flip(win)
+                    show_msg(win, text=text)
                     core.wait(timings.feedback_duration)
 
                 eeg.send("trial_end")
@@ -771,34 +806,7 @@ def main(results_dir, sequences_file):
 
     except Exception as e:
         print("Unexpected error:", e)
-
-    finally:
-        # * ################ SAVE DATA ################
-        # date, time = sessInfo["date"].split("_")
-        # date = date.replace("-", "_")
-
-        fname = f"subj_{subj_id}-sess_{sess_id}"
-        fpath = session_dir / f"{fname}.csv"
-        print(f"Exporting results to {fpath} ...")
-
-        pd.DataFrame(sessData).T.to_csv(fpath)
-
-        # * ################ END OF EXPERIMENT ################
-        end_screen = visual.TextStim(
-            win,
-            text="End of experiment. Thank you for participating!",
-            # height=0.05 * window_size[1],
-        )
-        end_screen.draw()
-        win_flip(win)
-        core.wait(5)
-
-        terminate_task(win, eeg, eye_tracker, session_dir, edf_file)
-
-        eye_tracker.get_file(edf_file, session_dir)
-        eye_tracker.edf2asc(str(session_dir / edf_file))
-
-        code.interact(banner="Start", local=locals(), exitmsg="End")
+        # terminate_task() #TODO
 
 
 if __name__ == "__main__":
