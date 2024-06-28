@@ -19,6 +19,7 @@ from typing import Dict, List, Tuple, Union
 from collections import namedtuple
 from tqdm.auto import tqdm
 import code
+from setup import setup_stimuli
 
 wd = Path(__file__).parent
 os.chdir(wd)
@@ -53,7 +54,7 @@ results_dir = wd / "results"
 results_dir.mkdir(exist_ok=True)
 
 config_dir = wd.parent / "config"
-img_dir = config_dir / "images/resized"
+img_dir = wd / "images"
 
 # * Load experiment config
 with open(config_dir / "experiment_config.json") as f:
@@ -423,7 +424,9 @@ def invert_dict(d: dict):
     return {v: k for k, v in d.items()}
 
 
-def get_blocks(sequences: pd.DataFrame, block_size:int=20):        
+def get_blocks(
+    sequences: pd.DataFrame, x_positions, resp_mapping, block_size: int = 20
+):
     if (remainder := len(sequences) % block_size) != 0:
         n_blocks = (len(sequences) - remainder) / block_size
         blocks = np.array_split(sequences[:-remainder], n_blocks)
@@ -462,22 +465,26 @@ def main(results_dir, sequences_file):
 
     allowed_keys_str = ", ".join(exp_config["local"]["allowed_keys"])
 
-    images = {img_path.stem: img_path for img_path in img_dir.iterdir()}
-    icon_names = list(images.keys())
-
-    img_size = Image.open(images[icon_names[0]]).size
-
     sequences = pd.read_csv(sequences_file)
     sequences = sequences.sample(frac=1, random_state=0)
 
     # * Create a monitor object with your monitor's specifimcations
     monitors_info = get_monitors_info()
     my_monitor = [info for info in monitors_info if info["primary"] == True][0]
-    res_pixels = my_monitor["res"]
+    resolution = my_monitor["res"]
     my_monitor = monitors.Monitor(name=my_monitor["name"])
-    # TODO: add width=..., distance=...
-    my_monitor.setSizePix(res_pixels)
-    window_size = res_pixels
+    my_monitor.setSizePix(resolution)
+    window_size = resolution
+
+    max_items = 12
+    max_height = resolution[1] / 3
+    setup_stimuli(wd, resolution, max_height, max_items)
+    # TODO: implement image check -> regenerate if screen res has changed
+
+    images = {img_path.stem: img_path for img_path in img_dir.iterdir()}
+    icon_names = list(images.keys())
+
+    img_size = Image.open(images[icon_names[0]]).size
 
     assert int(window_size[1] / img_size[1]) > 3, "Window height too small"
 
@@ -489,7 +496,7 @@ def main(results_dir, sequences_file):
         window_size=window_size,
     )
 
-    blocks = get_blocks(sequences, block_size)
+    trial_blocks = get_blocks(sequences, x_positions, resp_mapping, block_size)
 
     # * Create a window
     # ! { TEMP
