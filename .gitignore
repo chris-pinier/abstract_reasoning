@@ -22,22 +22,22 @@ ANNs/results/*
 
 ANNs/draft/*
 # * ######## Local ########
-local/draft/*
-!local/draft/.gitkeep
+experiment-Lab/draft/*
+!experiment-Lab/draft/.gitkeep
 
-local/config/*
-!local/config/.gitkeep
+experiment-Lab/config/*
+!experiment-Lab/config/.gitkeep
 
-local/images/*
-!local/images/.gitkeep
+experiment-Lab/images/*
+!experiment-Lab/images/.gitkeep
 
-local/results/*
-!local/results/.gitkeep
+experiment-Lab/results/*
+!experiment-Lab/results/.gitkeep
 
-local/logs/*
-!local/logs/.gitkeep
+experiment-Lab/logs/*
+!experiment-Lab/logs/.gitkeep
 
-local/website/*
+experiment-Lab/website/*
 # * ######## Online ########
 experiment-Online/draft/*
 !online/draft/.gitkeep

@@ -21,21 +21,9 @@ from string import ascii_uppercase, ascii_lowercase
 from functools import wraps
 from rich import print as rprint
 from tabulate import tabulate
-from local.database import Database
-from local.local_utils import get_pixel_counts, reset_dir
+from database import Database
+from utils import get_pixel_counts, reset_dir
 import re
-
-def timing_filter(record):
-    return record["extra"].get("timing", False)
-
-
-# * Remove any existing handlers
-logger.remove()
-# * Add general log files (example)
-logger.add("./logs/file_X.log", rotation="00:01", retention="5 days", level="INFO")
-logger.add("./logs/timer.log", filter=timing_filter, level="INFO")
-
-timer_on = True
 
 
 def timer(enabled=True):
@@ -578,7 +566,9 @@ def get_choices_and_pres_order(
     return (i for i in combs_arr)
 
 
-def get_experiment_sequences(db, stim_IDs, n_by_pattern=6, masked_image_inds=None, save_dir=None):
+def get_experiment_sequences(
+    db, stim_IDs, n_by_pattern=6, masked_image_inds=None, save_dir=None
+):
     # TODO: implement masked_img_idx if index of list of indices is given
 
     # stim_IDs = list(stim_IDs.values())
@@ -592,7 +582,9 @@ def get_experiment_sequences(db, stim_IDs, n_by_pattern=6, masked_image_inds=Non
     cols = [i[1] for i in db.execute("PRAGMA table_info(combinations);")]
     n_cols = len(cols)
 
-    combinations = np.zeros((n_by_pattern * len(unique_patterns), n_cols), dtype="object")
+    combinations = np.zeros(
+        (n_by_pattern * len(unique_patterns), n_cols), dtype="object"
+    )
 
     for i, pattern in enumerate(tqdm(unique_patterns)):
         command = f"SELECT * FROM combinations WHERE pattern='{pattern}' "
@@ -645,7 +637,7 @@ def get_experiment_sequences(db, stim_IDs, n_by_pattern=6, masked_image_inds=Non
         formatted_row = [combination_ID] + seq_icon_IDs + choices
         formatted_row += [masked_image_idx, seq_order_str, choices_order_str, pattern]
         sequences.append(formatted_row)
-   
+
     cols = [
         "combinationID",
         "figure1",
@@ -665,7 +657,7 @@ def get_experiment_sequences(db, stim_IDs, n_by_pattern=6, masked_image_inds=Non
         "choice_order",
         "pattern",
     ]
-    
+
     sequences = pd.DataFrame(sequences)
     sequences.columns = cols
 
@@ -681,7 +673,7 @@ def get_experiment_sequences(db, stim_IDs, n_by_pattern=6, masked_image_inds=Non
     sequences.to_csv(fname2, index=False)
 
     # db.insert_sequences(#TODO)
-    
+
     # formatted_sequences = formatted_sequences.sample(frac=1)
 
     # pd.read_csv(fname1)

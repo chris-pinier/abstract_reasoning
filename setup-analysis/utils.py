@@ -4,6 +4,73 @@ import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
 import inspect
+from screeninfo import get_monitors
+import shutil
+from PIL import Image
+import numpy as np
+import pandas as pd
+
+def get_monitors_info():
+    current_monitors = [
+        {
+            "name": monitor.name if monitor.name else f"Monitor{i+1}",
+            "res": (monitor.width, monitor.height),
+            "width": monitor.width,
+            "height": monitor.height,
+            "width_mm": monitor.width_mm,
+            "height_mm": monitor.height_mm,
+            "primary": monitor.is_primary,
+        }
+        for i, monitor in enumerate(get_monitors())
+    ]
+
+    return current_monitors
+
+
+def reset_dir(directory: Union[str, Path], keep_stuct: bool = True):
+    directory = Path(directory)
+
+    if directory.exists():
+        subdirs = [d for d in directory.iterdir() if d.is_dir()]
+
+        for d in subdirs:
+            shutil.rmtree(d)
+
+        for subdir in subdirs:
+            subdir.mkdir(parents=True, exist_ok=True)
+    else:
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+def get_pixel_counts(images: Dict[str, Image.Image]):
+    # images = {k: Image.open(v) for k, v in imgs_dict.items()}
+
+    pixel_counts = {}
+    for img_name, img in images.items():
+        arr = np.asarray(img)
+        converted = np.where(arr > 0, 255, 0)
+        unique, counts = np.unique(converted, return_counts=True)
+        pixel_counts[img_name] = dict(zip(unique, counts))
+
+    df = pd.DataFrame(pixel_counts).T
+    df.rename(columns={0: "white", 255: "black"}, inplace=True)
+    df.drop(columns=["white"], inplace=True)
+
+    df["diff_ratio"] = round(df["black"] / df["black"].max(), 3)
+
+    df.sort_values("diff_ratio", ascending=False, inplace=True)
+    df.reset_index(drop=False, inplace=True)
+    df.rename(columns={"index": "img_name"}, inplace=True)
+
+    df["rank"] = df["diff_ratio"].rank(method="dense", ascending=False)
+
+    df.groupby("rank")["black"].mean()
+
+    # converted[:, :, 0][np.where(converted[:, :, 3] == 255)] = 255
+    # converted = converted.astype(np.uint8)
+    # converted = Image.fromarray(converted)
+
+    return df
 
 
 def pickle_save(path, data):

@@ -4,7 +4,7 @@ import numpy as np
 from pathlib import Path
 import json
 import re
-from local.database import Database
+from database import Database
 import seaborn as sns
 import seaborn.objects as so
 import matplotlib.pyplot as plt
@@ -26,17 +26,16 @@ from utils import (
     create_report_doc,
     custom_plot,
 )
-
+import os
 # from typing import List, Tuple, Union, Callable
 
 
 # * #### CONFIGURATION #### * #
+wd = Path(__file__).parent
+os.chdir(wd)
 
-with open("global_config/experiment_config.json") as f:
-    config = json.load(f)
-
-wd = Path(__file__).resolve().parent
-
+with open(wd.parent/"config/experiment_config.json") as f:
+    exp_config = json.load(f)
 
 directories = dict(results=wd / "local/results/pilot results")
 directories = to_named_tuple(directories, "Directories")
@@ -784,7 +783,7 @@ def subj_analysis_eeg(
     # stim_locs['baby-carriage'][0]
 
     # event_IDs = config["event_IDs"]
-    event_IDs = config["local"]["event_IDs"]
+    event_IDs = exp_config["local"]["event_IDs"]
     event_IDs_inv = invert_dict(event_IDs)
 
     # raw = mne.io.read_raw_bdf(
@@ -819,7 +818,7 @@ def subj_analysis_eeg(
     # * Channel Groups
     ch_names = raw.ch_names.copy()
     ch_names.remove(stim_channel)
-    ch_groups = config["local"]["EEG"]["ch_groups"]
+    ch_groups = exp_config["local"]["EEG"]["ch_groups"]
     assert all([ch in ch_names for group in ch_groups.values() for ch in group])
 
     for ch_group, chans in ch_groups.items():
@@ -1252,7 +1251,7 @@ def subj_analysis_eeg(
         stim_IDs = [
             id
             for id in events_df["event_name"].unique().tolist()
-            if id not in config["local"]["event_IDs"]
+            if id not in exp_config["local"]["event_IDs"]
         ]
 
         base_id = 900

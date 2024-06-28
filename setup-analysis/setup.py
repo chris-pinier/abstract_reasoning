@@ -1,7 +1,6 @@
 import os
 import platform
 from pathlib import Path
-from local.database import Database
 from typing import Union
 from stimuli_images import (
     standardize_images,
@@ -16,10 +15,12 @@ from icecream import ic
 from PIL import Image
 import json
 import shutil
+
 # import numpy as np
 # import pandas as pd
 import matplotlib.pyplot as plt
-from local.local_utils import get_monitors_info
+from utils import get_monitors_info
+from database import Database
 
 
 def manage_directories(directories: list, action: str):
@@ -41,14 +42,15 @@ def manage_directories(directories: list, action: str):
 def setup_stimuli(root_dir: Union[str, Path]):
     ic.enable()
 
+    # * Experiment directory (either lab, online or ANNs)
     root_dir = Path(root_dir)
 
-    config_dir = root_dir / "global_config"
+    config_dir = root_dir.parent / "config"
     config_file = config_dir / "experiment_config.json"
     img_dir = config_dir / "images/original"
 
-    std_img_dir = config_dir / "images/pixel_standardized"
-    resized_dir = config_dir / "images/resized"
+    std_img_dir = root_dir / "images/pixel_standardized"
+    resized_dir = root_dir / "images/resized"
     std_img_dir.mkdir(exist_ok=True, parents=True)
     resized_dir.mkdir(exist_ok=True, parents=True)
 
@@ -76,7 +78,7 @@ def setup_stimuli(root_dir: Union[str, Path]):
     plt.title("black pixels distribution (standardized)")
     plt.show()
 
-    df_imgs.to_excel(config_dir / "images_info.xlsx")  # , float_format="%.3f")
+    df_imgs.to_excel(root_dir / "images/imag|es_info.xlsx")  # , float_format="%.3f")
 
     # * Resize images based on screen resolution
     max_items = 12
@@ -94,12 +96,13 @@ def setup_stimuli(root_dir: Union[str, Path]):
     pix_counts["black"].hist()
     plt.title("black pixels distribution (scaled)")
     plt.show()
+    shutil.rmtree(resized_dir)
 
     bckgrd_color = (255, 255, 255)  # RGB color code for white
     img = Image.new("RGB", new_size, bckgrd_color)
 
     # Save the image if you want
-    img.save(config_dir / "images/blank_image.png")
+    img.save(root_dir / "images/blank_image.png")
 
     # * Generate all possible combinations
     question_mark = imgs_dict.pop("question-mark")
@@ -131,7 +134,7 @@ def setup_stimuli(root_dir: Union[str, Path]):
     # pattern_IDs_inv = {v: k for k, v in pattern_IDs.items()}
 
     with open(config_file, "r") as f:
-        config = json.load(f)
+        exp_config = json.load(f)
 
     # config["pattern_IDs"] = pattern_IDs
     # config["stim_IDs"] = stim_IDs
@@ -182,10 +185,11 @@ def create_symlinks(source, targets):
 
 def setup_structure(root_dir: Union[str, Path]):
 
-    gb_conf_dir = root_dir / "global_config"
+    config_dir = root_dir.parent / "config"
+    config_file = config_dir / "experiment_config.json"
 
     # * ### Create symlinks for images ###
-    source_dirs = [gb_conf_dir / "images/resized"]
+    source_dirs = [config_dir / "images/resized"]
 
     target_directories = [
         root_dir / "local/images/",
@@ -200,11 +204,11 @@ def setup_structure(root_dir: Union[str, Path]):
 
     # * ### Create symlinks for configuration files ###
     source_files = [
-        gb_conf_dir / "rules.json",
-        gb_conf_dir / "database.db",
-        gb_conf_dir / "selected_combinations-format[names].csv",
-        gb_conf_dir / "selected_combinations-format[IDs].csv",
-        gb_conf_dir / "experiment_config.json",
+        config_dir / "rules.json",
+        config_dir / "database.db",
+        config_dir / "selected_combinations-format[names].csv",
+        config_dir / "selected_combinations-format[IDs].csv",
+        config_dir / "experiment_config.json",
     ]
 
     target_directories = [
@@ -218,7 +222,7 @@ def setup_structure(root_dir: Union[str, Path]):
 
     # * ### Create symlink for blank image ###
     create_symlinks(
-        source=gb_conf_dir / "images/blank_image.png",
+        source=config_dir / "images/blank_image.png",
         targets=[root_dir / "local/images/", root_dir / "online/images/"],
     )
 
@@ -256,6 +260,6 @@ if __name__ == "__main__":
 
     setup_stimuli(root_dir)
 
-    setup_structure(root_dir)
+    # setup_structure(root_dir)
 
     print("Setup complete.")
