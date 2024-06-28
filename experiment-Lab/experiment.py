@@ -50,8 +50,8 @@ ic.configureOutput(includeContext=False, prefix="")
 
 # * ################ CONFIGURATION ################
 wd = Path(__file__).parent
-results_dir = wd / "results"
-results_dir.mkdir(exist_ok=True)
+results_dir = wd / "results/raw"
+results_dir.mkdir(parents=True, exist_ok=True)
 
 config_dir = wd.parent / "config"
 img_dir = wd / "images"
@@ -845,7 +845,4 @@ def main(results_dir, sequences_file):
 
 
 if __name__ == "__main__":
-    results_dir = wd / "results"
-    results_dir.mkdir(exist_ok=True)
-
     main(results_dir=results_dir, sequences_file=sequences_file)
