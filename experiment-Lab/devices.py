@@ -231,11 +231,18 @@ class EyeTracker:
 
     def open_file(self, edf_file: str):
         # # * check if the filename is valid (length <= 8 & no special char)
-        allowed_char = ascii_letters + digits + "_"
-        conditions = [all([c in allowed_char for c in self.file]), len(self.file) <= 8]
-        if not all(conditions):
-            print("FILE CREATION ERROR: Invalid EDF filename")
-            return
+        # if not edf_file.lower().endswith(".edf"):
+        #     edf_file += ".EDF"
+
+        # allowed_char = ascii_letters + digits + "_"
+        # conditions = [
+        #     all([c in allowed_char for c in edf_file[:-4]]),
+        #     len(edf_file) <= 8,
+        # ]
+
+        # if not all(conditions):
+        #     print("FILE CREATION ERROR: Invalid EDF filename")
+        #     return
 
         try:
             self.device.openDataFile(edf_file)
@@ -286,7 +293,7 @@ class EyeTracker:
             genv.fixMacRetinaDisplay()
 
         # * Request Pylink to use the PsychoPy window we opened above for calibration
-        print("OPENING GRAPHICS")  # !TEMP
+        # ic("OPENING GRAPHICS")  
         pylink.openGraphicsEx(genv)
 
     def calibrate(self):
@@ -396,7 +403,7 @@ class EyeTracker:
             print("ERROR: EDF2ASC utility not found")
             return
 
-        print("CONVERTING FILE...", end=" ")
+        print("CONVERTING FILE EDF FILE TO ASC...", end=" ")
         # * convert the EDF file to ASCII format
         if args is None:
             cmd = f"edf2asc {edf_file}"
