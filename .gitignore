@@ -55,7 +55,7 @@ experiment-Online/logs/*
 !online/logs/.gitkeep
 
 # * ###### Other ########
-.vscode
+# .vscode
 .secrets
 private.*
 eyetracking/
