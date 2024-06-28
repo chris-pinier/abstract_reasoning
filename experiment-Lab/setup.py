@@ -227,9 +227,9 @@ def setup_stimuli(
     pix_counts = standardize_images(original_imgs, dest_dir=dest_dir, return_imgs=False)
 
     pix_counts.sort_values("new_ratio", ascending=False, inplace=True)
-    pix_counts["new_ratio"].hist()
-    plt.title("black pixels distribution (standardized)")
-    plt.show()
+    # pix_counts["new_ratio"].hist()
+    # plt.title("black pixels distribution (standardized)")
+    # plt.show()
     # df_imgs.to_excel(root_dir / "images/images_info.xlsx")  # , float_format="%.3f")
 
     # * Resize images based on screen resolution
@@ -244,9 +244,9 @@ def setup_stimuli(
     scaled_images = scale_images(original_imgs, absolute=new_size, dest_dir=dest_dir)
 
     pix_counts = get_pixel_counts(scaled_images)
-    pix_counts["black"].hist()
-    plt.title("black pixels distribution (scaled)")
-    plt.show()
+    # pix_counts["black"].hist()
+    # plt.title("black pixels distribution (scaled)")
+    # plt.show()
 
 
 # if __name__ == "__main__":
