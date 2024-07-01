@@ -19,10 +19,9 @@ from typing import Dict, List, Tuple, Union
 from collections import namedtuple
 from tqdm.auto import tqdm
 import code
-from setup import setup_stimuli
-
 wd = Path(__file__).parent
 os.chdir(wd)
+from setup import setup_stimuli
 from utils import sess_prep2, get_monitors_info
 from devices import EEGcap, EyeTracker
 
@@ -641,6 +640,7 @@ def main(results_dir, sequences_file):
                 avail_choices = list(trial["resp_map"].values())
 
                 intertrial_time = np.random.randint(iti[0], iti[1] + 1, size=1)[0]
+                core.wait(1)
                 core.wait(intertrial_time)
 
                 # * Load the sequence images for the current trial

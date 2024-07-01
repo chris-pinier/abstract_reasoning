@@ -38,14 +38,16 @@ class EEGcap:
         try:
             self.port_read = parallel.ParallelPort(self.read_address)
             self.port_write = parallel.ParallelPort(self.write_address)
-            ic("EEG device connected")
+            self.port_write.setData(0)
+            print("EEG device connected")
         except Exception as e:
-            ic(e)
+            print("Error when trying to connect to EEG amplifier.\nDetails:", e)
             core.quit()
             sys.exit()
 
     def send(self, data: str) -> None:
         data_int = self.event_IDs.get(data, self.event_IDs["invalid"])
+        print(f"{data} ({data_int}) sent to EEG device")
         self.port_write.setData(data_int)
         core.wait(0.01)
         self.port_write.setData(0)
@@ -293,7 +295,7 @@ class EyeTracker:
             genv.fixMacRetinaDisplay()
 
         # * Request Pylink to use the PsychoPy window we opened above for calibration
-        # ic("OPENING GRAPHICS")  
+        # ic("OPENING GRAPHICS")
         pylink.openGraphicsEx(genv)
 
     def calibrate(self):

@@ -129,9 +129,10 @@
       "trial_start": 41,
       "trial_aborted": 42,
       "trial_end": 43,
-      "stim-flash_sequence": 31,
-      "stim-flash_choices": 32,
-      "stim-all_stim": 33
+      "stim-flash_sequence": 51,
+      "stim-flash_choices": 52,
+      "stim-all_stim": 53,
+      "error": 100
     },
     "monitor": {
       "name": "Main",
