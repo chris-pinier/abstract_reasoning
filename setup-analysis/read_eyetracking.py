@@ -4,18 +4,27 @@ from mne.preprocessing.eyetracking import read_eyelink_calibration
 from mne.viz.eyetracking import plot_gaze
 import numpy as np
 import matplotlib.pyplot as plt
-
-# plt.ion()
 import matplotlib
 
-# matplotlib.use('QtAgg')
 mne.viz.set_browser_backend("qt")
 from pathlib import Path
+import os
+import json
+
+wd = Path(__file__).parent
+os.chdir(wd)
+config_dir = wd.parent / "config"
+
+# * Load experiment config
+with open(config_dir / "experiment_config.json") as f:
+    exp_config = json.load(f)
+
+valid_events = exp_config["local"]["event_IDs"]
 
 # res_dir = r"C:\Users\topuser\Documents\ChrisPinier\experiment1-new\experiment-Lab\results\raw"
 # res_dir = Path(res_dir)
 et_fpath = r"C:\Users\topuser\Documents\ChrisPinier\experiment1-new\experiment-Lab\results\raw\subj_000\sess_01\cp000.asc"
-eeg_fpath = r"C:\Users\topuser\Documents\ChrisPinier\experiment1-new\experiment-Lab\results\raw\subj_000\sess_01\cp-testing.bdf"
+eeg_fpath = r"C:\Users\topuser\Documents\ChrisPinier\experiment1-new\experiment-Lab\results\raw\subj_000\sess_01\cp-testing2.bdf"
 
 raw_et = mne.io.read_raw_eyelink(
     et_fpath,
@@ -60,9 +69,14 @@ plt.plot(raw_et["xpos_right"][0][0][t1:t2], raw_et["ypos_right"][0][0][t1:t2])
 
 
 # * ################ EEG
-raw_eeg = mne.io.read_raw(eeg_fpath)
+raw_eeg = mne.io.read_raw_bdf(eeg_fpath)
 # raw_eeg.plot()
 eeg_events = mne.find_events(
-    raw_eeg, min_duration=0.01, initial_event=True, shortest_event=1
+    raw_eeg, min_duration=0.01, initial_event=False, shortest_event=1, uint_cast=True
 )
+
+eeg_events -= 4096
+
+valid_events_inv = {v: k for k, v in valid_events.items()}
+[valid_events_inv.get(i) for i in eeg_events[:, 2]]
 sorted([int(i) for i in np.unique(eeg_events[:, 2])])
