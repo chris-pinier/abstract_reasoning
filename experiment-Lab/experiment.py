@@ -34,7 +34,7 @@ comments_desc = {
 # * ####################################################################################
 # * GLOBAL VARIABLES
 # * ####################################################################################
-logging.console.setLevel(logging.CRITICAL)
+# logging.console.setLevel(logging.CRITICAL)
 
 # * IP address of the EyeLink tracker; default = "100.1.1.1"
 eye_tracker_add = "100.1.1.1"
@@ -200,6 +200,7 @@ def sess_prep(
     sequences: pd.DataFrame,
     allowed_keys: List[str],
     window_size: List[int],
+    block_size: int,
 ) -> Tuple[Dict, Dict]:
 
     assert (
@@ -219,7 +220,7 @@ def sess_prep(
     choice_cols = [c for c in sequences.columns if match_cols_choice(c)]
 
     x_pos_seq = {}
-    new_sequences = sequences.copy()
+    # new_sequences = sequences.copy()
 
     for seq_length in range(1, len(seq_cols) + 1):  # * +1 for 0 index
         # * Calculate the total width of images & blank spaces for the item set
@@ -233,17 +234,18 @@ def sess_prep(
             start_pos + (i * x_shift) - window_size[0] / 2 for i in range(seq_length)
         ]
         x_pos_seq[seq_length] = {}
-        x_pos_seq[seq_length]["pos"] = [round(pos, 3) for pos in positions]  # positions
+        x_pos_seq[seq_length]["pos"] = [round(pos, 3) for pos in positions]
         x_pos_seq[seq_length]["sep_space_width"] = round(sep_space_width, 3)
 
-    for idx_row, row in tqdm(new_sequences.iterrows()):
+    # for idx_row, row in tqdm(new_sequences.iterrows()):
+    for idx_row, row in tqdm(sequences.iterrows()):
         x_positions[idx_row] = {}
 
         avail_choices = row.loc[choice_cols].dropna().tolist()
         sequence = row.loc[seq_cols].dropna().tolist()
 
         # * replace solution with the mask
-        new_sequences.loc[idx_row, seq_cols[row["masked_idx"]]] = solution_mask
+        # new_sequences.loc[idx_row, seq_cols[row["masked_idx"]]] = solution_mask
 
         # * Calculate the total width of images & blank spaces for the item set
         pos_info = x_pos_seq[len(sequence)]
@@ -265,7 +267,37 @@ def sess_prep(
 
         resp_mapping[idx_row] = {k: v for k, v in (zip(allowed_keys, avail_choices))}
 
-    return new_sequences, x_positions, resp_mapping
+    if (remainder := len(sequences) % block_size) != 0:
+        n_blocks = (len(sequences) - remainder) / block_size
+        blocks = np.array_split(sequences[:-remainder], n_blocks)
+        block_trials = sequences.iloc[-remainder:]
+        blocks.append(block_trials)
+        print(f"WARNING: uneven block sizes: {[len(b) for b in blocks]}")
+
+    trial_blocks = []
+    for block in blocks:
+        trials = []
+        for idx_row, row in block.iterrows():
+            trial = row.to_dict()
+            trial.update(
+                {
+                    "item_id": row["itemid"],
+                    "x_pos": x_positions[idx_row],
+                    "resp_map": resp_mapping[idx_row],
+                    "trial_type": "",
+                }
+            )
+            trial["seq_order"] = [int(i) for i in trial["seq_order"] if i.isdigit()]
+            trial["choice_order"] = [
+                int(i) for i in trial["choice_order"] if i.isdigit()
+            ]
+
+            trials.append(trial)
+        trial_blocks.append(trials)
+
+    trial_blocks = (block for block in trial_blocks)
+
+    return trial_blocks
 
 
 def show_msg(
@@ -440,42 +472,6 @@ def invert_dict(d: dict):
     return {v: k for k, v in d.items()}
 
 
-def get_blocks(
-    sequences: pd.DataFrame, x_positions, resp_mapping, block_size: int = 20
-):
-    if (remainder := len(sequences) % block_size) != 0:
-        n_blocks = (len(sequences) - remainder) / block_size
-        blocks = np.array_split(sequences[:-remainder], n_blocks)
-        block_trials = sequences.iloc[-remainder:]
-        blocks.append(block_trials)
-        print(f"WARNING: uneven block sizes: {[len(b) for b in blocks]}")
-
-    trial_blocks = []
-    for block in blocks:
-        trials = []
-        for idx_row, row in block.iterrows():
-            trial = row.to_dict()
-            trial.update(
-                {
-                    "item_id": row["itemid"],
-                    "x_pos": x_positions[idx_row],
-                    "resp_map": resp_mapping[idx_row],
-                    "trial_type": "",
-                }
-            )
-            trial["seq_order"] = [int(i) for i in trial["seq_order"] if i.isdigit()]
-            trial["choice_order"] = [
-                int(i) for i in trial["choice_order"] if i.isdigit()
-            ]
-
-            trials.append(trial)
-        trial_blocks.append(trials)
-
-    trial_blocks = (block for block in trial_blocks)
-
-    return trial_blocks
-
-
 def main(results_dir, sequences_file):
     # * ################ SETTING UP EXPERIMENT ################
     # check_config() if config_check else None
@@ -508,15 +504,14 @@ def main(results_dir, sequences_file):
 
     assert int(window_size[1] / img_size[1]) > height_factor, "Window height too small"
 
-    _, x_positions, resp_mapping = sess_prep(
+    trial_blocks = sess_prep(
         images=images,
         icons=icon_names,
         sequences=sequences,
         allowed_keys=exp_config["local"]["allowed_keys"],
         window_size=window_size,
+        block_size=block_size,
     )
-
-    trial_blocks = get_blocks(sequences, x_positions, resp_mapping, block_size)
 
     # * Create a window
     # ! { TEMP
@@ -627,20 +622,13 @@ def main(results_dir, sequences_file):
         response_clock = core.Clock()
 
         # * Send a signal to the EEG amplifier to indicate the start of the experiment
-        # event_name = "exp_start"
-        # eeg_device.send(event_name)
-        # eye_tracker.send(event_name)
         record_event("exp_start", eeg_device, eye_tracker)
 
         # * Main experiment loop
         for blockN, trials in enumerate(trial_blocks):
-            # event_name = "block_start"
-            # eeg_device.send(event_name)
-            # eye_tracker.send(event_name)
             record_event("block_start", eeg_device, eye_tracker)
 
             for trialN, trial in enumerate(trials):
-                # * Intertrial interval
                 sequence = [v for k, v in trial.items() if "figure" in k]
 
                 masked_idx = trial["masked_idx"]
@@ -686,9 +674,6 @@ def main(results_dir, sequences_file):
                 fix_cross.draw()
                 win_flip(win)
 
-                # event_name = "trial_start"
-                # eeg_device.send(event_name)
-                # eye_tracker.send(event_name)
                 record_event("trial_start", eeg_device, eye_tracker)
 
                 # * Displaying Sequence items one by one
@@ -721,10 +706,7 @@ def main(results_dir, sequences_file):
                 for img in all_imgs:
                     img.draw()
                 win_flip(win)
-
-                # event_name = "stim-all_stim"
-                # eeg_device.send(event_name)
-                # eye_tracker.send(event_name)
+                
                 record_event("stim-all_stim", eeg_device, eye_tracker)
 
                 # * Start response clock
@@ -745,8 +727,6 @@ def main(results_dir, sequences_file):
                 else:
                     choice_key, response_time = "timeout", "timeout"
 
-                # eeg_device.send(choice_key)
-                # eye_tracker.send(choice_key)
                 record_event(choice_key, eeg_device, eye_tracker)
 
                 if choice_key == "escape":
@@ -796,14 +776,11 @@ def main(results_dir, sequences_file):
                     show_msg(win, text=text)
                     core.wait(timings.feedback_duration)
 
-                # event_name = "trial_end"
-                # eeg_device.send(event_name)
-                # eye_tracker.send(event_name)
                 record_event("trial_end", eeg_device, eye_tracker)
 
                 sess_data[trialN] = {
                     "trial_idx": trialN,
-                    "participant_id": sess_info["subj_id"],
+                    "subj_id": sess_info["subj_id"],
                     "trial_type": trial["trial_type"],
                     "item_id": trial["item_id"],
                     "trial_onset_time": trial_onset_time,  # float(trial_onset_time),
@@ -832,9 +809,6 @@ def main(results_dir, sequences_file):
             # * BLOCK END -> PAUSE
             end_block(win, blockN=blockN, keys=exp_config["local"]["allowed_keys"])
 
-            # event_name = "block_end"
-            # eeg_device.send(event_name)
-            # eye_tracker.send(event_name)
             record_event("block_end", eeg_device, eye_tracker)
 
         terminate_task(win, eeg_device, eye_tracker, sess_data, sess_info, session_dir)
