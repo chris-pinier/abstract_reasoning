@@ -12,11 +12,23 @@ import sys
 
 # ! TEMPORARY
 disabled_funcs = {
-    "EEGcap.connect": [False, "EEGcap.connect() is disabled"],
+    "EEGcap.connect": [False, "mock EEG device connected"],
     "EEGcap.send": [False, None],
     "EyeTracker.connect": [False, "mock Eye-tracker connected"],
     "EyeTracker.send": [False, None],
+    "EyeTracker.get_file": [False, None],
+    "EyeTracker.disconnect": [False, None],
+    "EyeTracker.start_recording": [False, None],
+    "EyeTracker.draw_boxes": [False, None],
+    "EyeTracker.get_version": [False, None],
+    "EyeTracker.open_file": [False, None],
+    "EyeTracker.set_calib_env": [False, None],
+    "EyeTracker.calibrate": [False, None],
+    "EyeTracker.setup": [False, None],
+    "EyeTracker.edf2asc": [False, None],
 }
+disabled_funcs = {k: [True, f"DUMMY {k}"] for k in disabled_funcs.keys()}
+disabled_funcs = {k: [True, None] for k in disabled_funcs.keys()}
 # ! TEMPORARY
 
 
@@ -34,17 +46,19 @@ class EEGcap:
                 "integer value."
             )
 
+    @disable_decorator(*disabled_funcs["EEGcap.connect"])
     def connect(self) -> None:
         try:
             self.port_read = parallel.ParallelPort(self.read_address)
             self.port_write = parallel.ParallelPort(self.write_address)
-            self.port_write.setData(0)
+            self.reset_port()
             print("EEG device connected")
         except Exception as e:
             print("Error when trying to connect to EEG amplifier.\nDetails:", e)
             core.quit()
             sys.exit()
 
+    @disable_decorator(*disabled_funcs["EEGcap.send"])
     def send(self, data: str) -> None:
         data_int = self.event_IDs.get(data, self.event_IDs["invalid"])
         print(f"{data} ({data_int}) sent to EEG device")
@@ -52,6 +66,12 @@ class EEGcap:
         core.wait(0.01)
         self.port_write.setData(0)
         # print(f"{data} ({data_int})=> sent to {self.device_name} device")
+
+    def reset_port(self):
+        self.port_write.setData(255)  # Set all bits high
+        core.wait(0.01)
+        self.port_write.setData(0)  # Then set all low
+        core.wait(0.01)
 
 
 @dataclass
@@ -65,7 +85,7 @@ class EyeTracker:
     def __post_init__(self):
         self.connect()
 
-    # @disable_decorator(*disabled_funcs["EyeTracker.connect"])
+    @disable_decorator(*disabled_funcs["EyeTracker.connect"])
     def connect(self) -> None:
         try:
             self.device = pylink.EyeLink(self.ip_address)
@@ -74,6 +94,7 @@ class EyeTracker:
             core.quit()
             sys.exit()
 
+    @disable_decorator(*disabled_funcs["EyeTracker.get_file"])
     def get_file(self, fname: str, local_dir: str = None) -> None:
         # if not self.device.isConnected():
         #     raise RuntimeError("The eye-tracker is not connected.")
@@ -92,6 +113,7 @@ class EyeTracker:
         except RuntimeError as error:
             print("Error encountered when trying to get the file.\nERROR:", error)
 
+    @disable_decorator(*disabled_funcs["EyeTracker.disconnect"])
     def disconnect(self, session_folder: str, message: str = None) -> None:
         # el_tracker = pylink.getEYELINK()
 
@@ -125,9 +147,11 @@ class EyeTracker:
             # * Close the link to the tracker.
             self.device.close()
 
+    @disable_decorator(*disabled_funcs["EyeTracker.send"])
     def send(self, msg: str) -> None:
         self.device.sendMessage(msg)
 
+    @disable_decorator(*disabled_funcs["EyeTracker.start_recording"])
     def start_recording(self):
         if not self.device.isConnected():
             print("ERROR: EyeLink not connected")
@@ -153,6 +177,7 @@ class EyeTracker:
         # * Allocate some time for the tracker to cache some samples
         pylink.pumpDelay(100)  # ! We might want this outside of this object / method
 
+    @disable_decorator(*disabled_funcs["EyeTracker.draw_boxes"])
     def draw_boxes(self):
         raise NotImplementedError
         # # get a reference to the currently active EyeLink connection
@@ -231,6 +256,7 @@ class EyeTracker:
         #     abort_trial()
         #     return pylink.TRIAL_ERROR
 
+    @disable_decorator(*disabled_funcs["EyeTracker.open_file"])
     def open_file(self, edf_file: str):
         # # * check if the filename is valid (length <= 8 & no special char)
         # if not edf_file.lower().endswith(".edf"):
@@ -258,6 +284,7 @@ class EyeTracker:
             core.quit()
             sys.exit()
 
+    @disable_decorator(*disabled_funcs["EyeTracker.set_calib_env"])
     def set_calib_env(
         self,
         win,
@@ -298,6 +325,7 @@ class EyeTracker:
         # ic("OPENING GRAPHICS")
         pylink.openGraphicsEx(genv)
 
+    @disable_decorator(*disabled_funcs["EyeTracker.calibrate"])
     def calibrate(self):
         # * Start the calibration process
         try:
@@ -306,6 +334,7 @@ class EyeTracker:
             print("ERROR:", err)
             self.device.exitCalibration()
 
+    @disable_decorator(*disabled_funcs["EyeTracker.get_version"])
     def get_version(self, verbose=False):
         vstr = self.device.getTrackerVersionString()
         vs_numb = int(vstr.split()[-1].split(".")[0])
@@ -313,6 +342,7 @@ class EyeTracker:
         print(f"Running experiment on {vstr}, version {vs_numb}") if verbose else None
         return vs_numb
 
+    @disable_decorator(*disabled_funcs["EyeTracker.setup"])
     def setup(self, win, eye: str, use_retina=False):
         """ "
         eye: str: ["left", "right"]
@@ -385,6 +415,7 @@ class EyeTracker:
         dv_coords = f"DISPLAY_COORDS  0 0 {scn_width - 1} {scn_height - 1}"
         self.device.sendMessage(dv_coords)
 
+    @disable_decorator(*disabled_funcs["EyeTracker.edf2asc"])
     @staticmethod
     def edf2asc(edf_file: Union[str, Path], args: str = None):
         """

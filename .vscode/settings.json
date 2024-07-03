@@ -1,4 +1,5 @@
 {
+    "interactiveWindow.executeWithShiftEnter": true,
     "editor.formatOnSave": true,
     "[python]": {
         "editor.rulers": [

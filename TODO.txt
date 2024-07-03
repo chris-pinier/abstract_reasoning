@@ -1,4 +1,4 @@
 - eye tracking calibration doesn't show: screen size, screen distance, screen resolution
-- cursor briefly appears on screen after fixation cross disappears
-- implement fix wait time after or before intertrial time
-- escape key causes choice to appear as correct??
+- DONE | cursor briefly appears on screen after fixation cross disappears
+- implement fixed wait time after or before intertrial time
+- escape key causes choice to appear as correct?? 

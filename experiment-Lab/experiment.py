@@ -19,6 +19,7 @@ from typing import Dict, List, Tuple, Union
 from collections import namedtuple
 from tqdm.auto import tqdm
 import code
+
 wd = Path(__file__).parent
 os.chdir(wd)
 from setup import setup_stimuli
@@ -44,6 +45,8 @@ use_retina = False
 # * set to True if you want to check the configuration before starting the experiment
 config_check = True
 
+fullscr = True
+
 # icecream config
 ic.configureOutput(includeContext=False, prefix="")
 
@@ -61,7 +64,7 @@ with open(config_dir / "experiment_config.json") as f:
 
 block_size = 21
 
-sequences_file = "abstract_reasoning-sequences.csv"
+sequences_file = wd / "sequences/sequences1.csv"
 
 valid_events = exp_config["local"]["event_IDs"]
 # * ####################################################################################
@@ -86,7 +89,8 @@ def check_config():
 
 
 def win_flip(win, cursor=False, bg_color=(0, 0, 0)):
-    win.winHandle.set_mouse_visible(cursor)
+    # win.winHandle.set_mouse_visible(cursor)
+    win.mouseVisible = cursor
     win.fillColor = bg_color
     win.flip()
 
@@ -126,8 +130,6 @@ def display_images_sequentially(
             # fix_cross.draw()
             win_flip(win)
 
-            # eeg_device.send(event_name)
-            # eye_tracker.send(event_name)
             record_event(event_name, eeg_device, eye_tracker)
             # stim_pres_times[f"{idx}-{img_name}-time"] = global_clock.getTime()
             core.wait(pres_duration)
@@ -138,8 +140,6 @@ def display_images_sequentially(
                 images[img_idx].draw()
                 # fix_cross.draw()
                 win_flip(win)
-                # eeg_device.send(event_name)
-                # eye_tracker.send(event_name)
                 record_event(event_name, eeg_device, eye_tracker)
     win_flip(win)  # ! Not sure if this is necessary
 
@@ -206,7 +206,7 @@ def sess_prep(
         len(set([Image.open(im).size for im in images.values()])) == 1
     ), "Images must have same size"
 
-    solution_mask = "question-mark"
+    # solution_mask = "question-mark"
 
     img_size = Image.open(images[icons[0]]).size
     x_positions = {}
@@ -353,7 +353,7 @@ def show_dialogue():
         ok_data = dlg.show()
 
         if dlg.OK:  # if ok_data is not None
-            print("EDF data filename: {}".format(ok_data["edf_fname"]))
+            print(f"EDF data filename: {ok_data['edf_fname']}.EDF")
         else:
             print("user cancelled")
             core.quit()
@@ -370,10 +370,15 @@ def show_dialogue():
         # check if the filename is valid (length <= 8 & no special char)
         allowed_char = ascii_letters + digits + "_"
 
-        if not all([c in allowed_char for c in edf_fname]):
-            print("ERROR: Invalid EDF filename")
-        elif len(edf_fname) > 8:
-            print("ERROR: EDF filename should not exceed 8 characters")
+        edf_name_conds = [
+            all([c in allowed_char for c in edf_fname]),
+            1 <= len(edf_fname) <= 8,
+        ]
+
+        if not all(edf_name_conds):
+            print(
+                "ERROR: Invalid EDF filename. Name should be 1 to 8 characters long and contain only letters, numbers, and underscores."
+            )
         else:
             break
 
@@ -382,7 +387,7 @@ def show_dialogue():
     ok_data["sess"] = str(ok_data["sess"]).zfill(2)
     ok_data["date"] = get_timestamp("%Y%m%d_%H%M%S")
     ok_data["sess_id"] = f"{ok_data['subj_id']}-{ok_data['sess']}-{ok_data['date']}"
-    print(f"{ok_data['edf_file']}")
+
     return ok_data
 
 
@@ -405,8 +410,6 @@ def terminate_task(
     """
     session_dir = Path(session_dir)
     event_name = "experiment_end"
-    # eeg_device.send(event_name)
-    # eye_tracker.send(event_name)
     record_event(event_name, eeg_device, eye_tracker)
 
     eye_tracker.get_file(sess_info["edf_file"], session_dir)
@@ -428,9 +431,10 @@ def terminate_task(
     )
     # * close the PsychoPy window
     win.close()
+
     # * quit PsychoPy
     core.quit()
-    code.interact(banner="Start", local=locals(), exitmsg="End")
+    # * quit Python
     sys.exit()
 
 
@@ -443,8 +447,6 @@ def abort_trial(
     session_dir: str,
 ):
     event_name = "trial_aborted"
-    # eye_tracker.send(event_name)
-    # eeg_device.send(event_name)
     record_event(event_name, eeg_device, eye_tracker)
 
     choice = show_msg(
@@ -457,8 +459,6 @@ def abort_trial(
 
     if choice[0] == "escape":
         event_name = "experiment_aborted"
-        # eeg_device.send(event_name)
-        # eye_tracker.send(event_name)
         record_event(event_name, eeg_device, eye_tracker)
 
         terminate_task(win, eeg_device, eye_tracker, sess_data, sess_info, session_dir)
@@ -474,7 +474,6 @@ def invert_dict(d: dict):
 def main(results_dir, sequences_file):
     # * ################ SETTING UP EXPERIMENT ################
     # check_config() if config_check else None
-    # db = Database(exp_config['global']["database_path"])
 
     allowed_keys_str = ", ".join(exp_config["local"]["allowed_keys"])
 
@@ -482,9 +481,17 @@ def main(results_dir, sequences_file):
     sequences = sequences.sample(frac=1, random_state=0)
 
     # * Create a monitor object with your monitor's specifimcations
+    config_res = exp_config["local"]["monitor"]["resolution"]
     monitors_info = get_monitors_info()
     my_monitor = [info for info in monitors_info if info["primary"] == True][0]
     resolution = my_monitor["res"]
+
+    if resolution != config_res:
+        print("WARNING: Monitor resolution does not match the configuration file")
+        user_choice = input("continue? y/n").lower()
+        if user_choice != "y":
+            sys.exit()
+
     my_monitor = monitors.Monitor(name=my_monitor["name"])
     my_monitor.setSizePix(resolution)
     window_size = resolution
@@ -515,7 +522,6 @@ def main(results_dir, sequences_file):
     # * Create a window
     # ! { TEMP
     # window_size = [1080, 720]
-    fullscr = True
     # ! TEMP }
 
     # pres_frames * frame_dur
@@ -528,7 +534,6 @@ def main(results_dir, sequences_file):
     sess_info = show_dialogue()
     edf_file = sess_info["edf_file"]
 
-    results_dir = Path(results_dir)
     session_dir = results_dir / f"subj_{sess_info['subj_id']}/sess_{sess_info['sess']}"
     session_dir.mkdir(parents=True)
 
@@ -554,8 +559,11 @@ def main(results_dir, sequences_file):
             color=[0, 0, 0],
             units="pix",
         )
-        win_flip(win)  # TODO: check if this is necessary
+        win.mouseVisible = False
 
+        # win_flip(win)  # TODO: check if this is necessary
+
+        # TODO: fix this
         if not (refresh_rate := exp_config["local"]["monitor"].get("refresh_rate")):
             refresh_rate = win.getActualFrameRate()
             print(f"Measured frame rate: {refresh_rate}Hz")
@@ -606,9 +614,6 @@ def main(results_dir, sequences_file):
         if pressed_key[0] == "escape":
             abort_trial(win, eeg_device, eye_tracker, sess_data, sess_info, session_dir)
 
-        fix_cross.draw()
-        win_flip(win)
-
         y_pos = [-img_size[1], img_size[1]]
         y_pos_choices, y_pos_sequence = y_pos
 
@@ -628,6 +633,11 @@ def main(results_dir, sequences_file):
             record_event("block_start", eeg_device, eye_tracker)
 
             for trialN, trial in enumerate(trials):
+                # * Display the fixation cross in the middle of the screen
+                win_flip(win)
+                fix_cross.draw()
+                win_flip(win)
+
                 sequence = [v for k, v in trial.items() if "figure" in k]
 
                 masked_idx = trial["masked_idx"]
@@ -670,10 +680,6 @@ def main(results_dir, sequences_file):
                 # * Start of trial, record onset time
                 trial_onset_time = global_clock.getTime()
 
-                # * Display the fixation cross in the middle of the screen
-                fix_cross.draw()
-                win_flip(win)
-
                 record_event("trial_start", eeg_device, eye_tracker)
 
                 # * Displaying Sequence items one by one
@@ -706,7 +712,7 @@ def main(results_dir, sequences_file):
                 for img in all_imgs:
                     img.draw()
                 win_flip(win)
-                
+
                 record_event("stim-all_stim", eeg_device, eye_tracker)
 
                 # * Start response clock
@@ -733,6 +739,7 @@ def main(results_dir, sequences_file):
                     abort_trial(
                         win, eeg_device, eye_tracker, sess_data, sess_info, session_dir
                     )
+                    continue
 
                 # * Check if pressed key is allowed and choice is correct
                 elif choice_key in exp_config["local"]["allowed_keys"]:
@@ -798,13 +805,8 @@ def main(results_dir, sequences_file):
                     "intertrial_time": intertrial_time,  # int(intertrial_time),
                 }
 
-                fix_cross.draw()
-                win_flip(win)
-
-                # * INSERT DATA INTO DATABASE
-                # db.insert_results_pilot([list(sess_data[trialN].values())])
                 # * For debugging
-                ic(trial["item_id"], choice, response_time, intertrial_time)
+                ic(trial["item_id"], choice, solution, correct, response_time, intertrial_time)
 
             # * BLOCK END -> PAUSE
             end_block(win, blockN=blockN, keys=exp_config["local"]["allowed_keys"])
