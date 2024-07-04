@@ -107,10 +107,10 @@ def record_event(event_name, eeg_device, eye_tracker):
 def display_images_sequentially(
     win,
     images,
-    # fix_cross,
     eeg_device,
     eye_tracker,
     event_name,
+    fix_cross: visual.TextStim = None,
     pres_duration=None,
     pres_frames=None,
     order=None,
@@ -127,7 +127,8 @@ def display_images_sequentially(
     if pres_duration:
         for img_idx in order:
             images[img_idx].draw()
-            # fix_cross.draw()
+            if fix_cross is not None:
+                fix_cross.draw()
             win_flip(win)
 
             record_event(event_name, eeg_device, eye_tracker)
@@ -138,10 +139,11 @@ def display_images_sequentially(
         for img_idx in order:
             for _ in range(pres_frames):
                 images[img_idx].draw()
-                # fix_cross.draw()
+                if fix_cross is not None:
+                    fix_cross.draw()
                 win_flip(win)
                 record_event(event_name, eeg_device, eye_tracker)
-    win_flip(win)  # ! Not sure if this is necessary
+    # win_flip(win)  # ! Not sure if this is necessary
 
 
 def get_feedback(
@@ -178,19 +180,19 @@ def get_feedback(
     core.wait(duration)
 
 
-def end_block(win, blockN=None, keys=None):
-    # !TODO: check and implement this function
-    if blockN is None:
-        text = "End of block."
-    else:
-        text = f"End of block {blockN}."
+# def end_block(win, blockN=None, keys=None, text=None):
+#     # !TODO: check and implement this function
+#     if blockN is None:
+#         text = "End of block."
+#     else:
+#         text = f"End of block {blockN}."
 
-    text += (
-        "\nTake a break.\n"
-        "Place your fingers on the a, x, m, l keys and press one of them to continue."
-    )
+#     text += (
+#         "\nTake a break.\n"
+#         "Place your fingers on the a, x, m, l keys and press one of them to continue."
+#     )
 
-    show_msg(win, text, keys=keys)
+#     show_msg(win, text, keys=keys)
 
 
 def sess_prep(
@@ -769,8 +771,6 @@ def main(results_dir, sequences_file):
                     correct = "invalid"
                     choice = "invalid"
                     text = "Timeout"
-                    # visual.TextStim(win, text=text).draw()
-                    # win_flip(win)
                     show_msg(win, text=text)
                     core.wait(timings.feedback_duration)
 
@@ -778,8 +778,6 @@ def main(results_dir, sequences_file):
                     correct = "invalid"
                     choice = "invalid"
                     text = f"Invalid key pressed, make sure to use these keys: {allowed_keys_str}"
-                    # visual.TextStim(win, text=text).draw()
-                    # win_flip(win)
                     show_msg(win, text=text)
                     core.wait(timings.feedback_duration)
 
@@ -806,10 +804,23 @@ def main(results_dir, sequences_file):
                 }
 
                 # * For debugging
-                ic(trial["item_id"], choice, solution, correct, response_time, intertrial_time)
+                ic(
+                    trial["item_id"],
+                    choice,
+                    solution,
+                    correct,
+                    response_time,
+                    intertrial_time,
+                )
 
             # * BLOCK END -> PAUSE
-            end_block(win, blockN=blockN, keys=exp_config["local"]["allowed_keys"])
+            text = (
+                f"End of block {blockN}"
+                "\nTake a break\n"
+                f"Place your fingers on the {', '.join(exp_config['local']['allowed_keys'])} keys \nand press one of them to continue"
+            )
+            show_msg(win, text, keys=exp_config["local"]["allowed_keys"])
+            # end_block(win, blockN=blockN, keys=exp_config["local"]["allowed_keys"])
 
             record_event("block_end", eeg_device, eye_tracker)
 

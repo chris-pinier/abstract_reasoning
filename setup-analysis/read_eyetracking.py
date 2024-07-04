@@ -24,7 +24,7 @@ valid_events = exp_config["local"]["event_IDs"]
 # res_dir = r"C:\Users\topuser\Documents\ChrisPinier\experiment1-new\experiment-Lab\results\raw"
 # res_dir = Path(res_dir)
 
-et_fpath = wd.parent/"experiment-Lab/results/raw/" "cp555.asc"
+et_fpath = wd.parent / "experiment-Lab/results/raw/" "cp555.asc"
 # eeg_fpath = wd.parent/"experiment-Lab/results/raw/" " subj_000/sess_01/cp-testing2.bdf"
 
 raw_et = mne.io.read_raw_eyelink(
