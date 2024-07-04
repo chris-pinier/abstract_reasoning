@@ -137,7 +137,10 @@
     "monitor": {
       "name": "Main",
       "refresh_rate": 120,
-      "resolution": null,
+      "resolution": [
+        2560,
+        1440
+      ],
       "width_px": null,
       "height_px": null,
       "monitor_dims_mm": null,

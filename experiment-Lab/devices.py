@@ -28,7 +28,7 @@ disabled_funcs = {
     "EyeTracker.edf2asc": [False, None],
 }
 # disabled_funcs = {k: [True, f"DUMMY {k}"] for k in disabled_funcs.keys()}
-disabled_funcs = {k: [False, None] for k in disabled_funcs.keys()}
+disabled_funcs = {k: [True, None] for k in disabled_funcs.keys()}
 # ! TEMPORARY
 
 
@@ -61,7 +61,7 @@ class EEGcap:
     @disable_decorator(*disabled_funcs.get("EEGcap.send", (False, None)))
     def send(self, data: str) -> None:
         data_int = self.event_IDs.get(data, self.event_IDs["invalid"])
-        print(f"{data} ({data_int}) sent to EEG device")
+        # print(f"{data} ({data_int}) sent to EEG device")
         self.port_write.setData(data_int)
         core.wait(0.01)
         self.port_write.setData(0)
@@ -343,9 +343,10 @@ class EyeTracker:
         return vs_numb
 
     @disable_decorator(*disabled_funcs.get("EyeTracker.setup", (False, None)))
-    def setup(self, win, eye: str, use_retina=False):
+    def setup(self, win, eye: str, use_retina=False, screen_distance: int = None):
         """ "
         eye: str: ["left", "right"]
+        screen_distance: int: in millimeters
         """
         # * Put the tracker in offline mode before we change tracking parameters
         self.device.setOfflineMode()
@@ -393,6 +394,9 @@ class EyeTracker:
         # mon = monitors.Monitor("myMonitor", width=53.0, distance=70.0)
         # win = visual.Window(fullscr=full_screen, monitor=mon, winType="pyglet", units="pix")
 
+        if screen_distance:
+            self.device.sendCommand(f"simulation_screen_distance = {screen_distance}")
+
         # * get the native screen resolution used by PsychoPy
         scn_width, scn_height = win.size
         # # resolution fix for Mac retina displays
@@ -436,7 +440,7 @@ class EyeTracker:
             print("ERROR: EDF2ASC utility not found")
             return
 
-        print("CONVERTING FILE EDF FILE TO ASC...", end=" ")
+        # print("CONVERTING FILE EDF FILE TO ASC...", end=" ")
         # * convert the EDF file to ASCII format
         if args is None:
             cmd = f"edf2asc {edf_file}"
@@ -449,7 +453,7 @@ class EyeTracker:
             # except (subprocess.CalledProcessError, FileNotFoundError) as e:
             #     raise e("Command does not exists")
         os.system(cmd)
-        print("DONE")
+        # print("DONE")
 
         # * check if the ASCII file was created
         asc_file = Path(str(edf_file).replace(".EDF", ".asc"))

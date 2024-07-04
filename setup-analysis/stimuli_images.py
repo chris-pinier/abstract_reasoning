@@ -14,41 +14,11 @@ import sqlite3
 from math import factorial
 import shutil
 import pyperclip
-import time
-import pendulum
-from loguru import logger
 from string import ascii_uppercase, ascii_lowercase
-from functools import wraps
-from rich import print as rprint
 from tabulate import tabulate
 from database import Database
 from utils import get_pixel_counts, reset_dir
 import re
-
-
-def timer(enabled=True):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if not enabled:
-                return func(*args, **kwargs)
-
-            start = time.perf_counter()
-            results = func(*args, **kwargs)
-            end = time.perf_counter()
-
-            elapsed = pendulum.duration(seconds=end - start)
-            elapsed_str = f"{elapsed.total_seconds()} seconds"
-            elapsed_str = f"Elapsed time for `{func.__name__}`: {elapsed_str}"
-
-            rprint(f"[green]{elapsed_str}[/green]")
-            logger.info(elapsed_str)
-
-            return results
-
-        return wrapper
-
-    return decorator
 
 
 def create_collage(
