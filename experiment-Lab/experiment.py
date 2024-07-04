@@ -89,8 +89,9 @@ def check_config():
 
 
 def win_flip(win, cursor=False, bg_color=(0, 0, 0)):
-    # win.winHandle.set_mouse_visible(cursor)
+    win.winHandle.set_mouse_visible(cursor)
     win.mouseVisible = cursor
+    win.winHandle.set_mouse_position(-1, -1)
     win.fillColor = bg_color
     win.flip()
 
@@ -180,21 +181,6 @@ def get_feedback(
     core.wait(duration)
 
 
-# def end_block(win, blockN=None, keys=None, text=None):
-#     # !TODO: check and implement this function
-#     if blockN is None:
-#         text = "End of block."
-#     else:
-#         text = f"End of block {blockN}."
-
-#     text += (
-#         "\nTake a break.\n"
-#         "Place your fingers on the a, x, m, l keys and press one of them to continue."
-#     )
-
-#     show_msg(win, text, keys=keys)
-
-
 def sess_prep(
     images: Dict[str, str],
     icons: List[str],
@@ -276,6 +262,7 @@ def sess_prep(
         print(f"WARNING: uneven block sizes: {[len(b) for b in blocks]}")
 
     trial_blocks = []
+
     for block in blocks:
         trials = []
         for idx_row, row in block.iterrows():
@@ -305,7 +292,7 @@ def show_msg(
     win: visual.window.Window, text: str, kwargs: dict = None, keys: list = None
 ):
     """Show message on psychopy window"""
-    # win_flip(win)
+    win_flip(win)
     kwargs = {} if kwargs is None else kwargs
     msg = visual.TextStim(win, text, **kwargs)
     # TODO : color=txt_color, wrapWidth=scn_width / 2)
@@ -340,14 +327,14 @@ def show_dialogue():
 
         dlg.addText("Eye tracking")
         dlg.addField(key="edf_fname", label="File Name:")
-        dlg.addField(
-            "mode",
-            "Tracking mode:",
-            choices=["monocular", "binocular"],
-            initial="monocular",
-        )
+        # dlg.addField(
+        #     "mode",
+        #     "Tracking mode:",
+        #     choices=["monocular", "binocular"],
+        #     initial="monocular",
+        # )
         dlg.addField("eye", "Eye tracked:", choices=["left", "right", "both"])
-        dlg.addField(key="eye_screen_dist", label="Eye to Screen Distance (cm):")
+        dlg.addField(key="eye_screen_dist", label="Eye to Screen Distance (mm):")
 
         # ! IMPLEMENT: validate fields -> subj_id should be required
 
@@ -415,8 +402,8 @@ def terminate_task(
     record_event(event_name, eeg_device, eye_tracker)
 
     eye_tracker.get_file(sess_info["edf_file"], session_dir)
-    eye_tracker.edf2asc(session_dir / sess_info["edf_file"])
     eye_tracker.disconnect(session_dir)
+    eye_tracker.edf2asc(session_dir / sess_info["edf_file"])
 
     # # * ################ SAVE DATA ################
     behav_fpath = session_dir / f"{sess_info['sess_id']}-behav.csv"
@@ -457,8 +444,6 @@ def abort_trial(
         keys=["return", "escape"],
     )
 
-    # choice = event.waitKeys(keyList=["return", "escape"])
-
     if choice[0] == "escape":
         event_name = "experiment_aborted"
         record_event(event_name, eeg_device, eye_tracker)
@@ -466,14 +451,65 @@ def abort_trial(
         terminate_task(win, eeg_device, eye_tracker, sess_data, sess_info, session_dir)
 
     elif choice[0] == "return":
-        show_msg(win, "Starting next trial...")
+        return
 
 
 def invert_dict(d: dict):
     return {v: k for k, v in d.items()}
 
 
+def testing():
+
+    win = visual.Window(
+        size=(2560, 1440),
+        winType="pyglet",
+        fullscr=True,
+        screen=0,
+        color=[0, 0, 0],
+        units="pix",
+    )
+    # win.mouseVisible = False
+    # win.winHandle.set_mouse_visible(False)
+    # win_flip(win, cursor=True)
+    core.wait(2)
+
+    show_msg(win, "WELCOME, press enter to continue", keys=["return"])
+    win_flip(win, cursor=True)
+
+    for xpos in range(0, 900, 100):
+        core.wait(1)
+        win.winHandle.set_mouse_position(-1, -1)
+
+    key = event.waitKeys()
+
+    show_msg(win, "START")
+    core.wait(2)
+    win_flip(win)
+
+    show_msg(win, "SCREEN 1")
+    core.wait(2)
+    win.flip(win)
+
+    show_msg(win, "PRESS ANY KEY TO QUIT")
+    key = event.waitKeys()
+
+    win.close()
+    core.quit()
+    sys.exit()
+
+
 def main(results_dir, sequences_file):
+    # * ################ DIALOG BOX -> PARTICIPANT & SESSION NUMBER ################
+    sess_info = show_dialogue()
+    edf_file = sess_info["edf_file"]
+
+    session_dir = results_dir / f"subj_{sess_info['subj_id']}/sess_{sess_info['sess']}"
+    session_dir.mkdir(parents=True)
+
+    sess_info_file = session_dir / f"{sess_info['sess_id']}.json"
+    with open(sess_info_file, "w") as f:
+        json.dump(sess_info, f)
+
     # * ################ SETTING UP EXPERIMENT ################
     # check_config() if config_check else None
 
@@ -483,18 +519,24 @@ def main(results_dir, sequences_file):
     sequences = sequences.sample(frac=1, random_state=0)
 
     # * Create a monitor object with your monitor's specifimcations
-    config_res = exp_config["local"]["monitor"]["resolution"]
+    config_res = tuple(exp_config["local"]["monitor"]["resolution"])
     monitors_info = get_monitors_info()
     my_monitor = [info for info in monitors_info if info["primary"] == True][0]
     resolution = my_monitor["res"]
 
     if resolution != config_res:
-        print("WARNING: Monitor resolution does not match the configuration file")
-        user_choice = input("continue? y/n").lower()
+        print(
+            "WARNING: Monitor resolution does not match the configuration file\n"
+            f"Current resolution: {resolution}, configured resolution: {config_res}"
+        )
+        user_choice = input("continue? y/n: ").lower()
         if user_choice != "y":
             sys.exit()
 
-    my_monitor = monitors.Monitor(name=my_monitor["name"])
+    my_monitor = monitors.Monitor(
+        name=my_monitor["name"],
+        distance=sess_info["eye_screen_dist"] * 10,  # * psychopy wants cm
+    )
     my_monitor.setSizePix(resolution)
     window_size = resolution
 
@@ -522,22 +564,11 @@ def main(results_dir, sequences_file):
     )
 
     # * Create a window
-    # ! { TEMP
-    # window_size = [1080, 720]
-    # ! TEMP }
-
     # pres_frames * frame_dur
     # valid_timings = np.arange(frame_dur, 10, frame_dur)
     # precision = 3
     # # Select numbers that are 'accurate' after rounding
     # valid_timings = valid_timings[np.round(valid_timings, precision) == valid_timings]
-
-    # * ################ DIALOG BOX -> PARTICIPANT & SESSION NUMBER ################
-    sess_info = show_dialogue()
-    edf_file = sess_info["edf_file"]
-
-    session_dir = results_dir / f"subj_{sess_info['subj_id']}/sess_{sess_info['sess']}"
-    session_dir.mkdir(parents=True)
 
     # * ################ EEG & Eye Tracker  ################
     eeg_conf = exp_config["local"]["EEG"]
@@ -562,8 +593,10 @@ def main(results_dir, sequences_file):
             units="pix",
         )
         win.mouseVisible = False
+        win.winHandle.set_mouse_visible(False)
+        win.winHandle.set_mouse_position(-1, -1)
 
-        # win_flip(win)  # TODO: check if this is necessary
+        win_flip(win)  # TODO: check if this is necessary
 
         # TODO: fix this
         if not (refresh_rate := exp_config["local"]["monitor"].get("refresh_rate")):
@@ -581,7 +614,9 @@ def main(results_dir, sequences_file):
         # * Presentation time in frames
         # pres_frames = int(timings.pres_duration * refresh_rate)
 
-        eye_tracker.setup(win, eye=sess_info["eye"])
+        eye_tracker.setup(
+            win, eye=sess_info["eye"], screen_distance=sess_info["eye_screen_dist"]
+        )
         eye_tracker.set_calib_env(win)
 
         show_msg(
@@ -601,11 +636,12 @@ def main(results_dir, sequences_file):
         )
 
         # * Welcome message
-        instr1 = """You are going to solve __ abstract reasoning problems like the one below. Your goal is to continue the sequence in the top row with one of the four options in the bottom row.
+        instr1 = """You are going to solve {n} abstract reasoning problems. Your goal is to continue the sequence in the top row with one of the four options in the bottom row.
         Use the keys a, x, m, l to select one of these options from left to right.
-        You will perform two practice trials with feedback before the start of the experiment.
-        Place your fingers on the a, x, m, l keys and press one of them to start the practice.
-        """
+        Place your fingers on the a, x, m, l keys and press one of them to continue.
+        """.format(
+            n=len(sequences)
+        )
 
         pressed_key = show_msg(
             win,
@@ -636,7 +672,6 @@ def main(results_dir, sequences_file):
 
             for trialN, trial in enumerate(trials):
                 # * Display the fixation cross in the middle of the screen
-                win_flip(win)
                 fix_cross.draw()
                 win_flip(win)
 
@@ -652,7 +687,6 @@ def main(results_dir, sequences_file):
                 avail_choices = list(trial["resp_map"].values())
 
                 intertrial_time = np.random.randint(iti[0], iti[1] + 1, size=1)[0]
-                core.wait(1)
                 core.wait(intertrial_time)
 
                 # * Load the sequence images for the current trial
@@ -684,14 +718,16 @@ def main(results_dir, sequences_file):
 
                 record_event("trial_start", eeg_device, eye_tracker)
 
+                core.wait(1)
+
                 # * Displaying Sequence items one by one
                 display_images_sequentially(
                     win=win,
                     images=sequence_imgs,
-                    # fix_cross=fix_cross,
                     eeg_device=eeg_device,
                     eye_tracker=eye_tracker,
                     event_name="stim-flash_sequence",
+                    # fix_cross=fix_cross,
                     pres_duration=timings.pres_duration,
                     order=trial["seq_order"],
                 )
@@ -700,10 +736,10 @@ def main(results_dir, sequences_file):
                 display_images_sequentially(
                     win=win,
                     images=avail_choices_imgs,
-                    # fix_cross=fix_cross,
                     eeg_device=eeg_device,
                     eye_tracker=eye_tracker,
                     event_name="stim-flash_choices",
+                    # fix_cross=fix_cross,
                     pres_duration=timings.pres_duration,
                     order=trial["choice_order"],
                 )
@@ -741,7 +777,6 @@ def main(results_dir, sequences_file):
                     abort_trial(
                         win, eeg_device, eye_tracker, sess_data, sess_info, session_dir
                     )
-                    continue
 
                 # * Check if pressed key is allowed and choice is correct
                 elif choice_key in exp_config["local"]["allowed_keys"]:
@@ -820,7 +855,6 @@ def main(results_dir, sequences_file):
                 f"Place your fingers on the {', '.join(exp_config['local']['allowed_keys'])} keys \nand press one of them to continue"
             )
             show_msg(win, text, keys=exp_config["local"]["allowed_keys"])
-            # end_block(win, blockN=blockN, keys=exp_config["local"]["allowed_keys"])
 
             record_event("block_end", eeg_device, eye_tracker)
 
