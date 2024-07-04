@@ -431,9 +431,9 @@ def abort_trial(
     win,
     eeg_device,
     eye_tracker,
-    sess_data: dict,
-    sess_info: dict,
-    session_dir: str,
+    # sess_data: dict,
+    # sess_info: dict,
+    # session_dir: str,
 ):
     event_name = "trial_aborted"
     record_event(event_name, eeg_device, eye_tracker)
@@ -445,13 +445,9 @@ def abort_trial(
     )
 
     if choice[0] == "escape":
-        event_name = "experiment_aborted"
-        record_event(event_name, eeg_device, eye_tracker)
-
-        terminate_task(win, eeg_device, eye_tracker, sess_data, sess_info, session_dir)
-
+        return "abort"
     elif choice[0] == "return":
-        return
+        return "continue"
 
 
 def invert_dict(d: dict):
@@ -499,6 +495,8 @@ def testing():
 
 
 def main(results_dir, sequences_file):
+    abort = False
+
     # * ################ DIALOG BOX -> PARTICIPANT & SESSION NUMBER ################
     sess_info = show_dialogue()
     edf_file = sess_info["edf_file"]
@@ -650,7 +648,13 @@ def main(results_dir, sequences_file):
         )
 
         if pressed_key[0] == "escape":
-            abort_trial(win, eeg_device, eye_tracker, sess_data, sess_info, session_dir)
+            abort_decision = abort_trial(
+                win, eeg_device, eye_tracker
+            )  # , sess_data, sess_info, session_dir)
+            if abort_decision == "abort":
+                win.close()
+                core.quit()
+                sys.exit()
 
         y_pos = [-img_size[1], img_size[1]]
         y_pos_choices, y_pos_sequence = y_pos
@@ -773,13 +777,8 @@ def main(results_dir, sequences_file):
 
                 record_event(choice_key, eeg_device, eye_tracker)
 
-                if choice_key == "escape":
-                    abort_trial(
-                        win, eeg_device, eye_tracker, sess_data, sess_info, session_dir
-                    )
-
                 # * Check if pressed key is allowed and choice is correct
-                elif choice_key in exp_config["local"]["allowed_keys"]:
+                if choice_key in exp_config["local"]["allowed_keys"]:
                     choice = trial["resp_map"][choice_key]
                     correct = choice == solution
 
@@ -808,6 +807,13 @@ def main(results_dir, sequences_file):
                     text = "Timeout"
                     show_msg(win, text=text)
                     core.wait(timings.feedback_duration)
+
+                elif choice_key == "escape":
+                    abort_decision = abort_trial(win, eeg_device, eye_tracker)
+                    if abort_decision == "abort":
+                        abort = True
+                    correct = "invalid"
+                    choice = "invalid"
 
                 else:
                     correct = "invalid"
@@ -847,6 +853,11 @@ def main(results_dir, sequences_file):
                     response_time,
                     intertrial_time,
                 )
+
+                if abort:
+                    terminate_task(
+                        win, eeg_device, eye_tracker, sess_data, sess_info, session_dir
+                    )
 
             # * BLOCK END -> PAUSE
             text = (
