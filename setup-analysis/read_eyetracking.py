@@ -20,7 +20,7 @@ with open(config_dir / "experiment_config.json") as f:
     exp_config = json.load(f)
 
 valid_events = exp_config["local"]["event_IDs"]
-valid_events_inv = {v:k for k,v in valid_events.items()}
+valid_events_inv = {v: k for k, v in valid_events.items()}
 
 # res_dir = r"C:\Users\topuser\Documents\ChrisPinier\experiment1-new\experiment-Lab\results\raw"
 # res_dir = Path(res_dir)
@@ -30,6 +30,7 @@ eeg_fpath = sess_dir / "cp0003.bdf"
 
 
 # * #################### EYE TRACKING ####################
+screen_resolution = exp_config["local"]["monitor"]["resolution"]
 
 raw_et = mne.io.read_raw_eyelink(et_fpath)  # , create_annotations=["blinks"])
 
@@ -38,9 +39,13 @@ print(f"number of calibrations: {len(cals)}")
 first_cal = cals[0]  # let's access the first (and only in this case) calibration
 print(first_cal)
 
-raw_et.plot(duration=0.5, scalings=dict(eyegaze=1e3))
-raw_et.annotations
+# raw_et.plot(duration=0.5, scalings=dict(eyegaze=1e3))
+# raw_et.annotations
 
+print(f"{raw_et.ch_names = }")
+chan_xpos, chan_ypos, chan_pupil = raw_et.ch_names
+x_pos = raw_et[chan_xpos][0][0]
+y_pos = raw_et[chan_ypos][0][0]
 
 # Read events from annotations
 et_events, et_events_dict = mne.events_from_annotations(raw_et)
@@ -70,39 +75,223 @@ for i in range(et_events.shape[0]):
 
 # Update et_events_dict with new IDs
 et_events_dict = {k: id_mapping[v] for k, v in et_events_dict.items()}
-et_events_dict_inv = {v:k for k,v in et_events_dict.items()}
+et_events_dict_inv = {v: k for k, v in et_events_dict.items()}
+
 
 # print("ID Mapping:", id_mapping)
 # print("Updated et_events_dict:", et_events_dict)
 # print("Unique event IDs after update:", np.unique(et_events[:, 2]))
-np.where(et_events[:, 2] == valid_events['trial_start'])[0].shape
-np.where(et_events[:, 2] == valid_events['trial_end'])[0].shape
-
-# [valid_events_inv[i] for i in et_events[:, 2] if i in valid_events_inv]
-
-epochs = mne.Epochs(
-    raw_et, et_events, event_repeated="merge", event_id=et_events_dict
-)  # event_id=dict(GOOD=1), tmin=0, tmax=10, preload=True)
-
-epochs["stim-all_stim"].plot()
-
-print(f"{raw_et.ch_names = }")
-chan_xpos, chan_ypos, chan_pupil = raw_et.ch_names
-x_pos = raw_et[chan_xpos][0]
-y_pos = raw_et[chan_ypos][0]
-
-np.nanmin(x_pos[0])
-np.nanmax(y_pos[0])
 
 
-import matplotlib.pyplot as plt
+# Find trial start and end events
+trial_start_inds = np.where(et_events[:, 2] == valid_events["trial_start"])[0]
+choice_onset_inds = np.where(et_events[:, 2] == valid_events["stim-all_stim"])[0]
+trial_end_inds = np.where(et_events[:, 2] == valid_events["trial_end"])[0]
 
-t = 30000
-plt.plot(raw_et["xpos_right"][0][0][:t], raw_et["ypos_right"][0][0][:t])
-t1, t2 = 30000, 34000
-plt.plot(raw_et["xpos_right"][0][0][t1:t2], raw_et["ypos_right"][0][0][t1:t2])
+choice_onset_inds = choice_onset_inds[:-1]  # ! TEMP
+
+trial_start_inds = trial_start_inds[:-1]  # ! TEMP
+
+# Ensure we have matching pairs of start and end events
+assert len(trial_start_inds) == len(
+    trial_end_inds
+), "Mismatch in number of start and end events"
 
 
+# Create a list to store our manual epochs
+manual_epochs = []
+
+# Loop through each trial
+for start, end in zip(trial_start_inds, trial_end_inds):
+# for start, end in zip(choice_onset_inds, trial_end_inds):
+# for start, end in zip(trial_start_inds, choice_onset_inds):
+    # Get start and end times in seconds
+    start_time = et_events[start, 0] / raw_et.info["sfreq"] - 0.5
+    end_time = et_events[end, 0] / raw_et.info["sfreq"] # + 0.5
+
+    # Crop the raw data to this time window
+    epoch_data = raw_et.copy().crop(tmin=start_time, tmax=end_time)
+
+    # Add this epoch to our list
+    manual_epochs.append(epoch_data)
+
+# Print some information about our epochs
+print(f"Number of epochs created: {len(manual_epochs)}")
+for i, epoch in enumerate(manual_epochs):
+    print(f"Epoch {i+1} duration: {epoch.times[-1] - epoch.times[0]:.2f} seconds")
+
+# manual_epochs[0].plot()
+
+
+# If you want to combine these into a single Epochs object:
+combined_epochs = mne.concatenate_raws(manual_epochs)
+
+screen_resolution = (2560, 1440)
+img_size = [213, 213]
+
+x_pos_stim = {
+    "items_set": [
+        -1042.222,
+        -744.444,
+        -446.667,
+        -148.889,
+        148.889,
+        446.667,
+        744.444,
+        1042.222,
+    ],
+    "avail_choice": [
+        -446.66700000000003,
+        -148.88900000000012,
+        148.88900000000012,
+        446.6669999999999,
+    ],
+}
+y_pos_choices, y_pos_sequence = [-img_size[1], img_size[1]]
+
+from matplotlib.patches import Rectangle
+
+
+def get_stim_screen(
+    screen_resolution, img_size, x_pos_stim, y_pos_choices, y_pos_sequence
+):
+    # Create the figure
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Set the limits of the plot to match the screen resolution
+    ax.set_xlim(0, screen_resolution[0])
+    ax.set_ylim(0, screen_resolution[1])
+
+    # Invert y-axis because screen coordinates typically have (0,0) at top-left
+    ax.invert_yaxis()
+
+    # Function to add image rectangle
+    def add_image_rect(x, y, color):
+        rect = Rectangle(
+            xy=(
+                x - img_size[0] / 2 + screen_resolution[0] / 2,
+                -y - img_size[1] / 2 + screen_resolution[1] / 2,
+            ),
+            width=img_size[0],
+            height=img_size[1],
+            fill=False,
+            edgecolor=color,
+            linewidth=2,
+        )
+        ax.add_patch(rect)
+
+    # Plot stimulus positions
+    # Top row (sequence)
+    for x in x_pos_stim["items_set"]:
+        add_image_rect(x, y_pos_sequence, "blue")
+
+    # Bottom row (choices)
+    for x in x_pos_stim["avail_choice"]:
+        add_image_rect(x, y_pos_choices, "red")
+
+    return fig
+
+
+fig = get_stim_screen(
+    screen_resolution, img_size, x_pos_stim, y_pos_choices, y_pos_sequence
+)
+
+
+def plot_eye_movements(
+    epoch,
+    tracked_eye,
+    x_pos_stim,
+    y_pos_choices,
+    y_pos_sequence,
+    screen_resolution,
+    img_size,
+):
+    # Extract x and y gaze positions
+    x_gaze = epoch[f"xpos_{tracked_eye}"][0][0]
+    y_gaze = epoch[f"ypos_{tracked_eye}"][0][0]
+
+    # Create the figure
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Set the limits of the plot to match the screen resolution
+    ax.set_xlim(0, screen_resolution[0])
+    ax.set_ylim(0, screen_resolution[1])
+
+    # Invert y-axis because screen coordinates typically have (0,0) at top-left
+    ax.invert_yaxis()
+
+    # Function to add image rectangle
+    def add_image_rect(x, y, color):
+        rect = Rectangle(
+            xy=(
+                x - img_size[0] / 2 + screen_resolution[0] / 2,
+                y - img_size[1] / 2 + screen_resolution[1] / 2,
+            ),
+            width=img_size[0],
+            height=img_size[1],
+            fill=False,
+            edgecolor=color,
+            linewidth=2,
+        )
+        ax.add_patch(rect)
+
+    # Plot stimulus positions
+    # Top row (sequence)
+    for x in x_pos_stim["items_set"]:
+        # - y_pos_sequence because we inverted the y-axis
+        add_image_rect(x, -y_pos_sequence, "blue")
+
+    # Bottom row (choices)
+    for x in x_pos_stim["avail_choice"]:
+        # - y_pos_choices because we inverted the y-axis
+        add_image_rect(x, -y_pos_choices, "red")
+
+    # Plot eye movements
+    # ax.plot(x_gaze + screen_resolution[0]/2, y_gaze + screen_resolution[1]/2, 'k-', alpha=0.5)
+
+    # scatter = ax.scatter(x_gaze + screen_resolution[0]/2, y_gaze + screen_resolution[1]/2,)
+    #  c=np.arange(len(x_gaze)), cmap='viridis', s=5)
+    scatter = ax.scatter(x_gaze, y_gaze, c=np.arange(len(x_gaze)), cmap="viridis")
+
+    # Add colorbar to show time progression
+    cbar = plt.colorbar(scatter)
+    cbar.set_label("Time (samples)", rotation=270, labelpad=15)
+
+    # # Set labels and title
+    ax.set_xlabel("X position (pixels)")
+    ax.set_ylabel("Y position (pixels)")
+    ax.set_title(
+        f'Eye Movements (Trial duration: {len(x_gaze)/epoch.info["sfreq"]:.2f} s)'
+    )
+
+    plt.tight_layout()
+
+    return fig
+
+
+tracked_eye = "left"
+
+epoch = manual_epochs[1]
+epoch.times.shape
+
+np.where(epoch.annotations.description == "stim-all_stim")[0]
+fig = plot_eye_movements(
+    epoch,
+    tracked_eye,
+    x_pos_stim,
+    y_pos_choices,
+    y_pos_sequence,
+    screen_resolution,
+    img_size,
+)
+
+# Now let's plot for each epoch
+eye_mvmts_figs = []
+for i, epoch in enumerate(manual_epochs):
+    fig = plot_eye_movements(epoch,tracked_eye, x_pos_stim, y_pos_choices, y_pos_sequence, screen_resolution, img_size)
+    plt.savefig(f'eye_movements_trial_{i+1}.png', dpi=300)
+    plt.close(fig)
+    eye_mvmts_figs.append(fig)
 # * #################### EEG  ####################
 
 raw_eeg = mne.io.read_raw_bdf(eeg_fpath, preload=True)
