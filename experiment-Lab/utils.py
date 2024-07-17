@@ -13,9 +13,17 @@ from typing import Union
 import shutil
 import re
 from functools import wraps
-
+import time
 
 # from typing import Any, Callable
+
+
+def invert_dict(d: dict):
+    return {v: k for k, v in d.items()}
+
+
+def get_timestamp(fmt="%Y_%m_%d-%H_%M_%S"):
+    return time.strftime(fmt, time.localtime())
 
 
 def disable_decorator(disable=False, message=None):
@@ -136,168 +144,22 @@ def convert_to_black(img, img_name: str = None, save_path: str = None):
     # np.unique(converted, return_counts=True)
 
 
-def exp_prep():
-    # img_dir = wd / "images/original"
-    # images = {im.stem: Image.open(im) for im in img_dir.glob("*.png")}
-
-    # df_imgs = standardize_images(images)
-    # df_imgs.sort_values("new_ratio", ascending=False)
-    # df_imgs["new_ratio"].hist()
-    # df_imgs["new_ratio"][1:].describe()
-    # df_imgs.head(60)
-    # df_imgs.to_excel(wd / "config/images_info.xlsx")  # , float_format="%.3f")
-
-    # std_img_dir = wd / "images/pixel_standardized"
-    # resized_dir = wd / "images/standardized-resized"
-
-    # if resized_dir.exists():
-    #     shutil.rmtree(resized_dir)
-
-    # images = [im for im in std_img_dir.glob("*.png")]
-    # scale_images(images, scale=0.08, res=res[0], save_dir=resized_dir)
-
-    # images = [im for im in resized_dir.glob("*.png")]
-    # len(images)
-
-    # imgs_dict = {im.stem: im for im in images}
-    # question_mark = imgs_dict.pop("question-mark")
-
-    # imgs_list = list(imgs_dict.values())
-    # shapes = list(imgs_dict.keys())
-
-    # # set(np.unique(shapes, return_counts=True)[1])
-
-    # selected_shapes = np.random.choice(shapes, replace=False, size=20)
-
-    # # all_combs = generate_all_combinations(selected_shapes, rules_1)
-
-    # all_combs = generate_all_combinations2(shapes[:20], rules_1)
-    # f"{len(all_combs):,}"
-
-    # # all_combs.to_csv(wd / "config/stimuli_combinations.csv")
-    # # all_combs = pd.read_csv(wd / "config/stimuli_combinations_0.csv")
-    # # all_combs.shape[0]
-    # n_splits = np.ceil(all_combs.shape[0] / 150_000)
-    # split_inds = np.array_split(np.arange(all_combs.shape[0]), n_splits)
-    # split_inds_ranges = [(r[0], r[-1]) for r in split_inds]
-
-    # pd.DataFrame(split_inds_ranges, columns=["start", "end"]).to_csv(
-    #     "config/stimuli_combinations_ranges.csv",
-    # )
-
-    # for i, inds in enumerate(split_inds):
-    #     all_combs.iloc[inds].to_csv(
-    #         wd / f"config/stimuli_combinations_{i}.csv", index_label="index"
-    #     )
-    #     # all_combs.iloc[inds].to_feather(wd / f"config/stimuli_combinations_{i}.feather")
-    # # pd.read_csv(wd / f"config/stimuli_combinations_{i}.csv", index_col="index")
-
-    # # for i in tqdm(range(n_splits)):
-    # #     df = pd.read_csv(wd / f"config/stimuli_combinations_{i}.csv")
-    # #     df.to_csv(
-    # #         wd / f"config/stimuli_combinations_{i}.csv", index=True, index_label="index"
-    # #     )
-    # #     # df.reset_index(drop=True, inplace=True)
-
-    # all_combs = [list(vals) for idx, vals in all_combs.iterrows()]
-    raise NotImplementedError
-
-
 def sess_prep(
     images: Dict[str, str],
-    shapes: List[str],
-    stim_combinations: pd.DataFrame,
-    allowed_keys: List[str],
-    window_size: List[int],
-) -> Tuple[Dict, Dict]:
-
-    assert (
-        len(set([Image.open(im).size for im in images.values()])) == 1
-    ), "Images must have same size"
-
-    img_size = Image.open(images[shapes[0]]).size
-    x_positions = {}
-    resp_mapping = {}
-
-    match_cols_choice = lambda x: re.compile("choice\d{1,2}", re.IGNORECASE).search(x)
-    match_cols_seq = lambda x: re.compile("figure\d{1,2}", re.IGNORECASE).search(x)
-
-    seq_cols = [c for c in stim_combinations.columns if match_cols_seq(c)]
-    choice_cols = [c for c in stim_combinations.columns if match_cols_choice(c)]
-
-    x_pos_seq = {}
-
-    for seq_length in range(1, len(seq_cols) + 2):  # +1 for 0 index, +1 for solution
-        # * Calculate the total width of images & blank spaces for the item set
-        total_width = img_size[0] * seq_length
-        empty_space_width = window_size[0] - total_width
-        sep_space_width = empty_space_width / (seq_length + 1)
-        x_shift = img_size[0] + sep_space_width
-        start_pos = sep_space_width + img_size[0] / 2
-
-        positions = [
-            start_pos + (i * x_shift) - window_size[0] / 2 for i in range(seq_length)
-        ]
-        x_pos_seq[seq_length] = {}
-        x_pos_seq[seq_length]["pos"] = [round(pos, 3) for pos in positions]  # positions
-        x_pos_seq[seq_length]["sep_space_width"] = round(sep_space_width, 3)
-
-    for idx_row, row in tqdm(stim_combinations.iterrows()):
-        x_positions[idx_row] = {}
-
-        solution = [row.loc["solution"]]
-        avail_choices = row.loc[choice_cols].dropna().tolist()
-        sequence = row.loc[seq_cols].dropna().tolist()
-        # row = row.to_dict()
-        # solution = [v for k, v in row.items() if "solution" in k]
-        # avail_choices = [v for k, v in row.items() if match_cols_choice(k)]
-        # sequence = [v for k, v in row.items() if match_cols_seq(k)]
-
-        sequence += ["question-mark"]
-
-        if len(solution) != 1:
-            raise NotImplementedError("Modify code to handle multiple solutions")
-        else:
-            solution = solution[0]
-
-        # * Calculate the total width of images & blank spaces for the item set
-        pos_info = x_pos_seq[len(sequence)]
-        x_positions[idx_row]["items_set"] = pos_info["pos"]
-        sep_space_width = x_pos_seq[len(sequence)]["sep_space_width"]
-
-        # * Calculate the total width of images & blank spaces for the available choices
-        # * keep same sep_space_width as for the item set => number of choices must be
-        # * <= number of items
-        x_shift = img_size[0] + sep_space_width
-        total_width = x_shift * len(avail_choices)
-        empty_space_width = window_size[0] - total_width
-        start_pos = empty_space_width / 2 + x_shift / 2
-
-        x_positions[idx_row]["avail_choice"] = [
-            start_pos + (i * x_shift) - window_size[0] / 2
-            for i in range(len(avail_choices))
-        ]
-
-        resp_mapping[idx_row] = {k: v for k, v in (zip(allowed_keys, avail_choices))}
-
-    return x_positions, resp_mapping
-
-
-def sess_prep2(
-    images: Dict[str, str],
-    shapes: List[str],
+    icons: List[str],
     sequences: pd.DataFrame,
     allowed_keys: List[str],
     window_size: List[int],
+    block_size: int,
 ) -> Tuple[Dict, Dict]:
 
     assert (
         len(set([Image.open(im).size for im in images.values()])) == 1
     ), "Images must have same size"
 
-    solution_mask = "question-mark"
+    # solution_mask = "question-mark"
 
-    img_size = Image.open(images[shapes[0]]).size
+    img_size = Image.open(images[icons[0]]).size
     x_positions = {}
     resp_mapping = {}
 
@@ -308,7 +170,7 @@ def sess_prep2(
     choice_cols = [c for c in sequences.columns if match_cols_choice(c)]
 
     x_pos_seq = {}
-    new_sequences = sequences.copy()
+    # new_sequences = sequences.copy()
 
     for seq_length in range(1, len(seq_cols) + 1):  # * +1 for 0 index
         # * Calculate the total width of images & blank spaces for the item set
@@ -322,17 +184,18 @@ def sess_prep2(
             start_pos + (i * x_shift) - window_size[0] / 2 for i in range(seq_length)
         ]
         x_pos_seq[seq_length] = {}
-        x_pos_seq[seq_length]["pos"] = [round(pos, 3) for pos in positions]  # positions
+        x_pos_seq[seq_length]["pos"] = [round(pos, 3) for pos in positions]
         x_pos_seq[seq_length]["sep_space_width"] = round(sep_space_width, 3)
 
-    for idx_row, row in tqdm(new_sequences.iterrows()):
+    # for idx_row, row in tqdm(new_sequences.iterrows()):
+    for idx_row, row in tqdm(sequences.iterrows()):
         x_positions[idx_row] = {}
 
         avail_choices = row.loc[choice_cols].dropna().tolist()
         sequence = row.loc[seq_cols].dropna().tolist()
 
         # * replace solution with the mask
-        new_sequences.loc[idx_row, seq_cols[row["maskedImageIdx"]]] = solution_mask
+        # new_sequences.loc[idx_row, seq_cols[row["masked_idx"]]] = solution_mask
 
         # * Calculate the total width of images & blank spaces for the item set
         pos_info = x_pos_seq[len(sequence)]
@@ -354,7 +217,38 @@ def sess_prep2(
 
         resp_mapping[idx_row] = {k: v for k, v in (zip(allowed_keys, avail_choices))}
 
-    return new_sequences, x_positions, resp_mapping
+    if (remainder := len(sequences) % block_size) != 0:
+        n_blocks = (len(sequences) - remainder) / block_size
+        blocks = np.array_split(sequences[:-remainder], n_blocks)
+        block_trials = sequences.iloc[-remainder:]
+        blocks.append(block_trials)
+        print(f"WARNING: uneven block sizes: {[len(b) for b in blocks]}")
+
+    trial_blocks = []
+
+    for block in blocks:
+        trials = []
+        for idx_row, row in block.iterrows():
+            trial = row.to_dict()
+            trial.update(
+                {
+                    "item_id": row["itemid"],
+                    "x_pos": x_positions[idx_row],
+                    "resp_map": resp_mapping[idx_row],
+                    "trial_type": "",
+                }
+            )
+            trial["seq_order"] = [int(i) for i in trial["seq_order"] if i.isdigit()]
+            trial["choice_order"] = [
+                int(i) for i in trial["choice_order"] if i.isdigit()
+            ]
+
+            trials.append(trial)
+        trial_blocks.append(trials)
+
+    trial_blocks = (block for block in trial_blocks)
+
+    return trial_blocks
 
 
 def load_stim_combs(n: int = None, inds: np.array = None, pb=False) -> pd.DataFrame:
@@ -439,39 +333,6 @@ def load_stim_combs2(
     combs["pattern"].unique()
 
     return combs
-
-
-def check_images_pixels():
-    # import matplotlib.pyplot as plt
-
-    img_dir = wd / "images/standardized-resized"
-    imgs_dict = {im.stem: Image.open(im) for im in img_dir.iterdir()}
-    img_sizes = tuple(set([im.size for im in imgs_dict.values()]))
-
-    pixel_counts = {}
-    converted_images = {}
-    for img_name, img in imgs_dict.items():
-        arr = np.asarray(img).copy()
-
-        np.unique(arr, return_counts=True)
-        np.unique(arr[:, :, 3])
-
-        # plt.imshow(arr)
-
-        arr[:, :, 3]
-        converted = np.where(arr > 0, 255, 0)
-        # converted = np.where(arr < 255, 0, 255)
-        plt.imshow(converted)
-        # Image.fromarray(converted, mode="RGBA").show()
-        # plt.imshow(converted)
-
-        # converted_images[img_name] = Image.fromarray(converted)
-        unique, counts = np.unique(converted, return_counts=True)
-        pixel_counts[img_name] = dict(zip(unique, counts))
-
-    df = pd.DataFrame(pixel_counts).T
-    df
-    df.sort_values(255, ascending=False)
 
 
 def update_conf_file():

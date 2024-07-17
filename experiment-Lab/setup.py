@@ -9,38 +9,8 @@ import shutil
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Dict, List
-
-
-def get_pixel_counts(images: Dict[str, Image.Image]):
-    # images = {k: Image.open(v) for k, v in imgs_dict.items()}
-
-    pixel_counts = {}
-    for img_name, img in images.items():
-        arr = np.asarray(img)
-        converted = np.where(arr > 0, 255, 0)
-        unique, counts = np.unique(converted, return_counts=True)
-        pixel_counts[img_name] = dict(zip(unique, counts))
-
-    df = pd.DataFrame(pixel_counts).T
-    df.rename(columns={0: "white", 255: "black"}, inplace=True)
-    df.drop(columns=["white"], inplace=True)
-
-    df["diff_ratio"] = round(df["black"] / df["black"].max(), 3)
-
-    df.sort_values("diff_ratio", ascending=False, inplace=True)
-    df.reset_index(drop=False, inplace=True)
-    df.rename(columns={"index": "img_name"}, inplace=True)
-
-    df["rank"] = df["diff_ratio"].rank(method="dense", ascending=False)
-
-    df.groupby("rank")["black"].mean()
-
-    # converted[:, :, 0][np.where(converted[:, :, 3] == 255)] = 255
-    # converted = converted.astype(np.uint8)
-    # converted = Image.fromarray(converted)
-
-    return df
+from typing import Dict, List, Tuple, Union
+import pathlib
 
 
 def get_mappings(stims, patterns):
@@ -52,207 +22,171 @@ def get_mappings(stims, patterns):
     return stim_IDs, pattern_IDs
 
 
-def scale_images(
-    images: List[str],
-    scale: int = None,
-    res: int = None,
-    absolute: List[int] = None,
-    min_dims: List[int] = None,
-    max_dims: List[int] = None,
-    dest_dir: str = None,
-    return_imgs: bool = True,
-):
-    """_summary_
-
-    Args:
-        images (List[str]): _description_
-        scale (int, optional): _description_. Defaults to None.
-        res (int, optional): _description_. Defaults to None.
-        absolute (List[int], optional): _description_. Defaults to None.
-        min_dims (List[int], optional): _description_. Defaults to None.
-        max_dims (List[int], optional): _description_. Defaults to None.
-        dest_dir (str, optional): _description_. Defaults to None.
-        return_imgs (bool, optional): _description_. Defaults to False.
-
-    Raises:
-        ValueError: _description_
-
-    Returns:
-        _type_: _description_
+def count_black_pixels(img: Image.Image) -> np.ndarray:
     """
-    images = {img.stem: Path(img) for img in images}
-
-    if not bool(scale) ^ bool(absolute):
-        raise ValueError(
-            "Either a scaling factor (`scale`) or absolute dimensions (`absolute`) must be provided, not both."
-        )
-
-    if scale is not None:
-        if res is not None:
-            new_dims = [int(res * scale)] * 2
-        else:
-            raise ValueError(
-                "If scale is provided, resolution must be provided as well."
-            )
-
-    if absolute is not None:
-        new_dims = absolute
-
-    if min_dims is not None:
-        min_check = all([dim1 >= dim2 for dim1, dim2 in zip(new_dims, min_dims)])
-    else:
-        min_check = True
-    if max_dims is not None:
-        max_check = all([dim1 <= dim2 for dim1, dim2 in zip(new_dims, max_dims)])
-    else:
-        max_check = True
-
-    if all([min_check, max_check]):
-        new_imgs = {
-            name: Image.open(img).resize(new_dims) for name, img in images.items()
-        }
-
-        if dest_dir is not None:
-            # dest_dir = Path(dest_dir)
-            # if dest_dir.exists():
-            #     shutil.rmtree(dest_dir)
-            # dest_dir.mkdir(parents=True)
-
-            for name, img in new_imgs.items():
-                img.save(dest_dir / f"{name}.png")
-        if return_imgs:
-            return new_imgs
-
-    else:
-        raise ValueError(
-            f"New dimensions {new_dims} must be between {min_dims} and {max_dims}. "
-            "Re-adjust the scale or min/max dimensions."
-        )
-
-
-def standardize_images(
-    images: List[str],
-    dest_dir: Union[str, Path] = None,
-    return_imgs: bool = True,
-):
-    imgs_dict = {Path(img).stem: Image.open(img) for img in images}
-
-    pix_counts = get_pixel_counts(imgs_dict)
-
-    # * Determine highest number of black pixels across images
-    max_black_pixels = pix_counts["black"].max()
-
-    # * Add a column for the resizing factor
-    # * The resizing factor is calculated as the square root of the ratio of the
-    # * max_black_pixels to the number of black pixels in each image
-    pix_counts["resize_factor"] = (max_black_pixels / pix_counts["black"]) ** 0.5
-    pix_counts["size"] = [im.size for im in imgs_dict.values()]
-
-    pix_counts["new_black"] = [None] * len(pix_counts)
-
-    new_sizes = []
-    new_images = {}
-
-    for row, values in pix_counts.iterrows():
-        size = values["size"]
-        new_size = tuple([int(i * values["resize_factor"]) for i in size])
-        new_sizes.append(new_size)
-
-        new_img = imgs_dict[values["img_name"]].resize(new_size)
-
-        arr = np.asarray(new_img)
-        converted = np.where(arr > 0, 255, 0)
-        _, counts = np.unique(converted, return_counts=True)
-        black_pixels = counts[1]
-
-        pix_counts.loc[row, "new_black"] = black_pixels
-
-        new_images[values["img_name"]] = new_img
-
-    new_max_black_pixels = pix_counts["new_black"].max()
-    pix_counts["new_size"] = new_sizes
-    pix_counts["new_ratio"] = pix_counts["new_black"] / new_max_black_pixels
-    pix_counts["new_ratio"] = pix_counts["new_ratio"].astype(float)
-    pix_counts["new_ratio"] = pix_counts["new_ratio"].round(3)
-
-    max_new_size = pix_counts["new_size"].max()[0]
-
-    for name, im in new_images.items():
-        rescaled_img = Image.new(
-            "RGBA", (max_new_size, max_new_size), (255, 255, 255, 1)
-        )
-        size = im.size[0]
-        offset = (max_new_size - size) // 2
-        rescaled_img.paste(im, (offset, offset))
-        new_images[name] = rescaled_img
-
-    if dest_dir is not None:
-        dest_dir = Path(dest_dir)
-        dest_dir.mkdir(exist_ok=True)
-
-        for name, img in new_images.items():
-            img.save(dest_dir / f"{name}.png")
-
-    if return_imgs:
-        return new_images, pix_counts
-    else:
-        return pix_counts
-
-
-def setup_stimuli(
-    root_dir: Union[str, Path], res: tuple, max_height: int, max_items: int
-):
+    img: PIL image object, mode: RGBA. Assumes black pixels have alpha value of 255 and
+    transparent pixels have alpha value of 0.
     """
-    root_dir: path to experiment directory (either lab, online or ANNs)
-    res: monitor resolution in pixels
-    max_height:
-    max_items:
+    assert img.mode == "RGBA", "Image mode must be RGBA."
+
+    img_array = np.array(img)
+
+    return np.sum(img_array[:, :, 3] == 255)
+
+
+def prepare_images(
+    input_folder: Union[str, Path],
+    output_folder: Union[str, Path],
+    size: Tuple[int, int] = None,
+    max_items: int = None,
+    blank_space_pct: float = 0.05,
+    resolution: Tuple[int, int] = None,
+) -> Dict[str, float]:
     """
-    ic.enable()
+    Resize images to a standard size while maintaining the aspect ratio. The images are
+    padded with transparent pixels to fill the standard size. Images are each scaled
+    down by a ratio based on the image with the minimum number of black pixels.
+    """
 
-    root_dir = Path(root_dir)
-    dest_dir = root_dir / "images"
-    config_dir = root_dir.parent / "config"
-    config_file = config_dir / "experiment_config.json"
-    source_imgs_dir = config_dir / "images/original"
+    # wd = Path(__file__).parent  # ! TEMP
+    # input_folder = wd.parent / "config" / "images" / "original copy" # ! TEMP
+    # output_folder = wd /"test_images" # ! TEMP
 
-    if dest_dir.exists():
-        shutil.rmtree(dest_dir)
-    dest_dir.mkdir()
+    input_folder = Path(input_folder)
+    output_folder = Path(output_folder)
 
-    original_imgs = [im for im in source_imgs_dir.glob("*.png")]
+    original_imgs = [im for im in input_folder.glob("*.png")]
     im_size = Image.open(original_imgs[0]).size
 
-    # * Standardize images to have ~ same number of black pixels
-    pix_counts = standardize_images(original_imgs, dest_dir=dest_dir, return_imgs=False)
+    if size is not None:
+        target_size = size
+    else:
+        # conds = [arg is not None for arg in [max_height, max_width, resolution]]
+        # assert all(
+        #     conds
+        # ), "Either size or all of max_height, max_width, and resolution must be provided."
+        # # * Resize images based on screen resolution
+        # resize_factor_x = max_width / im_size[0]
+        # resize_factor_y = max_height / im_size[1]
+        # resize_factor = min(resize_factor_x, resize_factor_y)
+        width, height = resolution
+        max_img_width = int(np.floor(width / max_items * (1 - blank_space_pct)))
+        max_img_height = int(np.floor(height / 3))
+        target_size = [min(max_img_width, max_img_height)] * 2
 
-    pix_counts.sort_values("new_ratio", ascending=False, inplace=True)
-    # pix_counts["new_ratio"].hist()
-    # plt.title("black pixels distribution (standardized)")
+    if not input_folder.exists():
+        raise FileNotFoundError(f"Input folder {input_folder} does not exist.")
+
+    if output_folder.exists():
+        imgs = {img.stem: Image.open(img) for img in output_folder.glob("*.png")}
+        images_sizes = set([img.size for img in imgs.values()])
+
+        if len(images_sizes) == 1:
+            if images_sizes.pop() == target_size:
+                black_pix_counts = {img: count_black_pixels(imgs[img]) for img in imgs}
+                black_pix_counts_arr = np.array(list(black_pix_counts.values()))
+                black_pix_counts_arr = black_pix_counts_arr / black_pix_counts_arr.max()
+                black_pix_counts = dict(
+                    zip(black_pix_counts.keys(), black_pix_counts_arr)
+                )
+                black_pix_counts = dict(
+                    sorted(black_pix_counts.items(), key=lambda x: x[1])
+                )
+                return black_pix_counts
+            else:
+                shutil.rmtree(output_folder)
+        else:
+            shutil.rmtree(output_folder)
+
+    output_folder.mkdir(parents=True, exist_ok=True)
+
+    # * First pass: resize all images and find the minimum black pixel count
+    min_black_pixels = float("inf")
+    resized_images = []
+
+    for filename in input_folder.glob("*.png"):
+        img = Image.open(filename)
+        img = img.resize(target_size, Image.LANCZOS)
+        black_pixels = count_black_pixels(img)
+        min_black_pixels = min(min_black_pixels, black_pixels)
+        resized_images.append((filename, img, black_pixels))
+
+    # print(f"Target black pixels: {min_black_pixels}")
+
+    # * Second pass: scale images based on the minimum black pixel count
+    black_pix_counts = {}
+    for filename, img, black_pixels in resized_images:
+        # * Calculate scaling factor
+        scale_factor = np.sqrt(min_black_pixels / black_pixels)
+
+        # * Scale the image
+        new_size = tuple(int(dim * scale_factor) for dim in img.size)
+        scaled_img = img.resize(new_size, Image.LANCZOS)
+
+        # * Create a new blank image of target size
+        final_img = Image.new("RGBA", target_size, color=(0, 0, 0, 0))
+
+        # * Calculate padding
+        left = (target_size[0] - new_size[0]) // 2
+        top = (target_size[1] - new_size[1]) // 2
+
+        # * Paste the scaled image onto the blank image
+        final_img.paste(scaled_img, (left, top))
+        black_pix_counts[filename.stem] = count_black_pixels(final_img)
+
+        # * Save the processed image
+        final_img.save(output_folder / f"{filename.stem}.png")
+
+    black_pix_counts_arr = np.array(list(black_pix_counts.values()))
+    black_pix_counts_arr = black_pix_counts_arr / black_pix_counts_arr.max()
+    black_pix_counts = dict(zip(black_pix_counts.keys(), black_pix_counts_arr))
+    black_pix_counts = dict(sorted(black_pix_counts.items(), key=lambda x: x[1]))
+
+    return black_pix_counts
+
+
+if __name__ == "__main__":
+    wd = Path(__file__).parent
+    original_imgs = [im for im in (wd.parent / "config/images/original").glob("*.png")]
+    img_size = set([Image.open(img).size for img in original_imgs])
+    if len(img_size) != 1:
+        raise ValueError("All images must have the same size.")
+    else:
+        img_size = img_size.pop()
+
+    imgs_info = prepare_images(
+        wd.parent / "config/images/original",
+        wd.parent / "config/images/standardized",
+        img_size,
+    )
+
+    # fig, axes = plt.subplots(21, 3, figsize=(20, 20))
+    # for i, ax in enumerate(axes.flatten()):
+    #     if i < len(original_imgs):
+    #         img = Image.open(original_imgs[i])
+    #         img_arr = np.array(img)
+    #         ax.imshow(img_arr)
+    #     ax.axis("off")
+    # plt.tight_layout()
     # plt.show()
-    # df_imgs.to_excel(root_dir / "images/images_info.xlsx")  # , float_format="%.3f")
+    # plt.close("all")
 
-    # * Resize images based on screen resolution
-    resize_factor_x = (res[0] / max_items) / im_size[0]
-    resize_factor_y = max_height / im_size[1]
-    resize_factor = min(resize_factor_x, resize_factor_y)
+    # ratios = list(imgs_info.values())
+    # plt.bar(range(len(ratios)), ratios)
 
-    new_size = [int(im_size[0] * resize_factor)] * 2
-    ic(new_size)
+    # # img = original_imgs[0]
+    # img = [img for img in original_imgs if "question-mark" in img.stem][0]
+    # for img in original_imgs:
+    #     img = Image.open(img)
+    #     img_arr = np.array(img)
+    #     img_arr[img_arr[:, :, 3] == 255] = 100
 
-    stdz_imgs = list(dest_dir.glob("*.png"))
-    scaled_images = scale_images(original_imgs, absolute=new_size, dest_dir=dest_dir)
+    #     plt.imshow(img_arr)
+    #     plt.axis("off")
+    #     # plt.tight_layout()
+    #     plt.xlim(0, img_arr.shape[0])
+    #     plt.ylim(img_arr.shape[1], 0)
+    #     plt.show()
+    #     plt.close()
 
-    pix_counts = get_pixel_counts(scaled_images)
-    # pix_counts["black"].hist()
-    # plt.title("black pixels distribution (scaled)")
-    # plt.show()
-
-
-# if __name__ == "__main__":
-# root_dir =
-# setup_stimuli(root_dir)
-
-# setup_structure(root_dir)
-
-# print("Setup complete.")
+##############

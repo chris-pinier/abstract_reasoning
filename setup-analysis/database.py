@@ -297,7 +297,7 @@ class Database:
             print(e)
 
 
-# if __name__ == "__main__":
-# wd = Path.cwd()
-# db = Database(wd.parent / "global_config/database.db")
-# db.manage_table("combinations", "head")
+if __name__ == "__main__":
+    wd = Path(__file__).parent
+    db = Database(wd.parent / "config/database.db")
+    db.manage_table("combinations", "head")

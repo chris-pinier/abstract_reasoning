@@ -22,8 +22,8 @@ import code
 
 wd = Path(__file__).parent
 os.chdir(wd)
-from setup import setup_stimuli
-from utils import sess_prep2, get_monitors_info
+from setup import prepare_images
+from utils import sess_prep, get_monitors_info, invert_dict, get_timestamp
 from devices import EEGcap, EyeTracker
 
 comments_desc = {
@@ -97,10 +97,6 @@ def win_flip(win, cursor=False, bg_color=(0, 0, 0)):
 
 
 def record_event(event_name, eeg_device, eye_tracker):
-    # assert (
-    #     event_name in valid_events
-    # ), f"Invalid event names: {event_name}. Must be one of {valid_events.keys()}. Check configuration file"
-
     eeg_device.send(event_name)
     eye_tracker.send(event_name)
 
@@ -179,113 +175,6 @@ def get_feedback(
     win_flip(win)
 
     core.wait(duration)
-
-
-def sess_prep(
-    images: Dict[str, str],
-    icons: List[str],
-    sequences: pd.DataFrame,
-    allowed_keys: List[str],
-    window_size: List[int],
-    block_size: int,
-) -> Tuple[Dict, Dict]:
-
-    assert (
-        len(set([Image.open(im).size for im in images.values()])) == 1
-    ), "Images must have same size"
-
-    # solution_mask = "question-mark"
-
-    img_size = Image.open(images[icons[0]]).size
-    x_positions = {}
-    resp_mapping = {}
-
-    match_cols_choice = lambda x: re.compile("choice\d{1,2}", re.IGNORECASE).search(x)
-    match_cols_seq = lambda x: re.compile("figure\d{1,2}", re.IGNORECASE).search(x)
-
-    seq_cols = [c for c in sequences.columns if match_cols_seq(c)]
-    choice_cols = [c for c in sequences.columns if match_cols_choice(c)]
-
-    x_pos_seq = {}
-    # new_sequences = sequences.copy()
-
-    for seq_length in range(1, len(seq_cols) + 1):  # * +1 for 0 index
-        # * Calculate the total width of images & blank spaces for the item set
-        total_width = img_size[0] * seq_length
-        empty_space_width = window_size[0] - total_width
-        sep_space_width = empty_space_width / (seq_length + 1)
-        x_shift = img_size[0] + sep_space_width
-        start_pos = sep_space_width + img_size[0] / 2
-
-        positions = [
-            start_pos + (i * x_shift) - window_size[0] / 2 for i in range(seq_length)
-        ]
-        x_pos_seq[seq_length] = {}
-        x_pos_seq[seq_length]["pos"] = [round(pos, 3) for pos in positions]
-        x_pos_seq[seq_length]["sep_space_width"] = round(sep_space_width, 3)
-
-    # for idx_row, row in tqdm(new_sequences.iterrows()):
-    for idx_row, row in tqdm(sequences.iterrows()):
-        x_positions[idx_row] = {}
-
-        avail_choices = row.loc[choice_cols].dropna().tolist()
-        sequence = row.loc[seq_cols].dropna().tolist()
-
-        # * replace solution with the mask
-        # new_sequences.loc[idx_row, seq_cols[row["masked_idx"]]] = solution_mask
-
-        # * Calculate the total width of images & blank spaces for the item set
-        pos_info = x_pos_seq[len(sequence)]
-        x_positions[idx_row]["items_set"] = pos_info["pos"]
-        sep_space_width = x_pos_seq[len(sequence)]["sep_space_width"]
-
-        # * Calculate the total width of images & blank spaces for the available choices
-        # * keep same sep_space_width as for the item set => number of choices must be
-        # * <= number of items
-        x_shift = img_size[0] + sep_space_width
-        total_width = x_shift * len(avail_choices)
-        empty_space_width = window_size[0] - total_width
-        start_pos = empty_space_width / 2 + x_shift / 2
-
-        x_positions[idx_row]["avail_choice"] = [
-            start_pos + (i * x_shift) - window_size[0] / 2
-            for i in range(len(avail_choices))
-        ]
-
-        resp_mapping[idx_row] = {k: v for k, v in (zip(allowed_keys, avail_choices))}
-
-    if (remainder := len(sequences) % block_size) != 0:
-        n_blocks = (len(sequences) - remainder) / block_size
-        blocks = np.array_split(sequences[:-remainder], n_blocks)
-        block_trials = sequences.iloc[-remainder:]
-        blocks.append(block_trials)
-        print(f"WARNING: uneven block sizes: {[len(b) for b in blocks]}")
-
-    trial_blocks = []
-
-    for block in blocks:
-        trials = []
-        for idx_row, row in block.iterrows():
-            trial = row.to_dict()
-            trial.update(
-                {
-                    "item_id": row["itemid"],
-                    "x_pos": x_positions[idx_row],
-                    "resp_map": resp_mapping[idx_row],
-                    "trial_type": "",
-                }
-            )
-            trial["seq_order"] = [int(i) for i in trial["seq_order"] if i.isdigit()]
-            trial["choice_order"] = [
-                int(i) for i in trial["choice_order"] if i.isdigit()
-            ]
-
-            trials.append(trial)
-        trial_blocks.append(trials)
-
-    trial_blocks = (block for block in trial_blocks)
-
-    return trial_blocks
 
 
 def show_msg(
@@ -380,10 +269,6 @@ def show_dialogue():
     return ok_data
 
 
-def get_timestamp(fmt="%Y_%m_%d-%H_%M_%S"):
-    return time.strftime(fmt, time.localtime())
-
-
 def terminate_task(
     win,
     eeg_device,
@@ -450,10 +335,6 @@ def abort_trial(
         return "continue"
 
 
-def invert_dict(d: dict):
-    return {v: k for k, v in d.items()}
-
-
 def testing():
 
     win = visual.Window(
@@ -494,6 +375,14 @@ def testing():
     sys.exit()
 
 
+def load_sequences(session: int, seed: int = None) -> pd.DataFrame:
+    sequences_files = [f for f in (wd / "sequences").glob("*.csv")]
+    sequences_files = {f.stem: f for f in sequences_files}
+
+    sequences = pd.read_csv(sequences_files[f"sequences{session}"])
+    return sequences
+
+
 def main(results_dir, sequences_file):
     abort = False
 
@@ -505,8 +394,6 @@ def main(results_dir, sequences_file):
     session_dir.mkdir(parents=True)
 
     sess_info_file = session_dir / f"{sess_info['sess_id']}.json"
-    with open(sess_info_file, "w") as f:
-        json.dump(sess_info, f)
 
     # * ################ SETTING UP EXPERIMENT ################
     # check_config() if config_check else None
@@ -538,19 +425,26 @@ def main(results_dir, sequences_file):
     my_monitor.setSizePix(resolution)
     window_size = resolution
 
-    max_items = 12
+    max_row_items = 9
+    max_width = resolution[0] / max_row_items
     height_factor = 3
     max_height = resolution[1] / height_factor
-    setup_stimuli(wd, resolution, max_height, max_items)
-    # TODO: implement image check -> regenerate if screen res has changed
-    # TODO: fix image resizing -> should all have similar black pixel counts
+
+    imgs_info = prepare_images(
+        # config_dir / "images/original",
+        config_dir / "images/standardized",
+        wd / "images",
+        size=(160, 160),
+    )
+
+    print(f"{imgs_info = }")
 
     images = {img_path.stem: img_path for img_path in img_dir.iterdir()}
     icon_names = list(images.keys())
 
     img_size = Image.open(images[icon_names[0]]).size
 
-    assert int(window_size[1] / img_size[1]) > height_factor, "Window height too small"
+    assert int(window_size[1] / img_size[1]) >= height_factor, "Window height too small"
 
     trial_blocks = sess_prep(
         images=images,
@@ -561,12 +455,10 @@ def main(results_dir, sequences_file):
         block_size=block_size,
     )
 
-    # * Create a window
-    # pres_frames * frame_dur
-    # valid_timings = np.arange(frame_dur, 10, frame_dur)
-    # precision = 3
-    # # Select numbers that are 'accurate' after rounding
-    # valid_timings = valid_timings[np.round(valid_timings, precision) == valid_timings]
+    sess_info.update({"window_size": window_size, "img_size": img_size, "Notes": ""})
+    
+    with open(sess_info_file, "w") as f:
+        json.dump(sess_info, f)
 
     # * ################ EEG & Eye Tracker  ################
     eeg_conf = exp_config["local"]["EEG"]
@@ -594,23 +486,18 @@ def main(results_dir, sequences_file):
         win.winHandle.set_mouse_visible(False)
         win.winHandle.set_mouse_position(-1, -1)
 
-        win_flip(win)  # TODO: check if this is necessary
+        win_flip(win)
 
         # TODO: fix this
         if not (refresh_rate := exp_config["local"]["monitor"].get("refresh_rate")):
             refresh_rate = win.getActualFrameRate()
-            print(f"Measured frame rate: {refresh_rate}Hz")
+            print(f"Measured frame rate: {refresh_rate} Hz")
 
-        print(f"Configured refresh rate: {refresh_rate}Hz")
-
-        # frame_dur = 1 / refresh_rate
+        print(f"Configured refresh rate: {refresh_rate} Hz")
 
         timings = exp_config["global"]["timings"]
         timings = namedtuple("Timings", timings.keys())(*timings.values())
         iti = timings.intertrial_interval
-
-        # * Presentation time in frames
-        # pres_frames = int(timings.pres_duration * refresh_rate)
 
         eye_tracker.setup(
             win, eye=sess_info["eye"], screen_distance=sess_info["eye_screen_dist"]

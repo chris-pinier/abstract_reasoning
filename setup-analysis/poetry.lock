@@ -1150,6 +1150,35 @@ files = [
 ]
 
 [[package]]
+name = "nibabel"
+version = "5.2.1"
+description = "Access a multitude of neuroimaging data formats"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "nibabel-5.2.1-py3-none-any.whl", hash = "sha256:2cbbc22985f7f9d39d050df47249771dfb8d48447f5e7a993177e4cabfe047f0"},
+    {file = "nibabel-5.2.1.tar.gz", hash = "sha256:b6c80b2e728e4bc2b65f1142d9b8d2287a9102a8bf8477e115ef0d8334559975"},
+]
+
+[package.dependencies]
+numpy = ">=1.20"
+packaging = ">=17"
+
+[package.extras]
+all = ["nibabel[dicomfs,minc2,spm,zstd]"]
+dev = ["tox"]
+dicom = ["pydicom (>=1.0.0)"]
+dicomfs = ["nibabel[dicom]", "pillow"]
+doc = ["matplotlib (>=1.5.3)", "numpydoc", "sphinx", "texext", "tomli"]
+doctest = ["tox"]
+minc2 = ["h5py"]
+spm = ["scipy"]
+style = ["tox"]
+test = ["pytest", "pytest-cov", "pytest-doctestplus", "pytest-httpserver", "pytest-xdist"]
+typing = ["tox"]
+zstd = ["pyzstd (>=0.14.3)"]
+
+[[package]]
 name = "numpy"
 version = "2.0.0"
 description = "Fundamental package for array computing in Python"
@@ -2331,4 +2360,4 @@ dev = ["black (>=19.3b0)", "pytest (>=4.6.2)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12.0"
-content-hash = "305925e4fa9d522af08fceac96dc3980a210b917279634b87930f9f9b9ebad34"
+content-hash = "d0e450db10593402c38a73d66ae20427b7d936ce8d120a1ded99aa50e539d182"

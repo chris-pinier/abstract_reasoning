@@ -306,4 +306,75 @@ raw_eeg.plot(events=eeg_events)
 valid_events_inv = {v: k for k, v in valid_events.items()}
 [valid_events_inv.get(i) for i in eeg_events[:, 2]]
 [valid_events_inv[int(i)] for i in np.unique(eeg_events[:, 2])]
+
 # pd.DataFrame(eeg_events[np.isin(eeg_events[:, 2], [10, 11,12,13,14])])
+
+
+# np.where(eeg_events[:, 2] == valid_events["m"])[0].shape
+# np.where(et_events[:, 2] == valid_events["m"])[0].shape
+
+np.unique(et_events[:, 2],  return_counts=True)
+
+def align_eeg_et(eeg_events, et_events):
+    start_eeg = np.where(eeg_events[:, 2] == valid_events['exp_start'])[0]
+    start_et = np.where(et_events[:, 2] == valid_events["exp_start"])[0]
+
+    end_eeg = np.where(eeg_events[:, 2] == valid_events['experiment_end'])[0]
+    end_et = np.where(et_events[:, 2] == valid_events["experiment_end"])[0]
+    np.unique(et_events[:, 2], return_counts=True)
+
+
+########################################################################################
+import mne
+
+# Path to your EEG data
+raw_eeg = mne.io.read_raw_bdf(eeg_fpath, preload=True)
+raw = raw_eeg.copy()
+fsaverage_path = mne.datasets.fetch_fsaverage(verbose=True)
+print("Fsaverage is located at:", fsaverage_path)
+
+# Drop non-EEG channels
+non_eeg_channels = ["EMG1", "EMG2", "EMG3", "EMG4", "EOGL", "EOGR", "EOGT", "EOGB"]
+raw.drop_channels(non_eeg_channels)
+
+# Load the standard head model from FreeSurfer's 'fsaverage'
+# subjects_dir = mne.datasets.sample.data_path() / "subjects"
+subjects_dir = Path(fsaverage_path).parent
+subject = "fsaverage"
+
+# Set montage for EEG
+montage = mne.channels.make_standard_montage("standard_1020")
+raw.set_montage(montage)
+
+# Create or load forward model using fsaverage as surrogate
+src = mne.setup_source_space(
+    subject, spacing="oct6", subjects_dir=subjects_dir, add_dist=False
+)
+
+model = mne.make_bem_model(subject=subject, subjects_dir=subjects_dir)
+bem = mne.make_bem_solution(model)
+fwd = mne.make_forward_solution(
+    raw.info, trans="fsaverage", src=src, bem=bem, eeg=True, mindist=5.0
+)
+
+# Compute inverse operator
+inverse_operator = mne.minimum_norm.make_inverse_operator(
+    raw.info, forward=fwd, noise_cov=None
+)
+
+# Compute inverse solution
+method = "dSPM"  # dynamic Statistical Parametric Mapping
+snr = 3.0
+lambda2 = 1.0 / snr**2
+stc = mne.minimum_norm.apply_inverse_raw(raw, inverse_operator, lambda2, method=method)
+
+# Visualize
+brain = stc.plot(
+    subjects_dir=subjects_dir,
+    subject=subject,
+    initial_time=0.1,
+    hemi="both",
+    views="lateral",
+    size=(800, 400),
+    time_viewer=True,
+)
