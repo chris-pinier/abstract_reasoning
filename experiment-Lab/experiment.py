@@ -97,6 +97,7 @@ def win_flip(win, cursor=False, bg_color=(0, 0, 0)):
 
 
 def record_event(event_name, eeg_device, eye_tracker):
+    print(f"{event_name = } SENT")
     eeg_device.send(event_name)
     eye_tracker.send(event_name)
 
@@ -211,7 +212,7 @@ def show_dialogue():
         dlg.addField(key="subj_id", label="ID:", required=True)
 
         dlg.addText("Experiment Info")
-        dlg.addField("group", "Group:", choices=["pilot", "experiment"])
+        # dlg.addField("group", "Group:", choices=["pilot", "experiment"])
         dlg.addField("sess", "Session:", choices=["1", "2", "3", "4", "5"])
 
         dlg.addText("Eye tracking")
@@ -222,7 +223,7 @@ def show_dialogue():
         #     choices=["monocular", "binocular"],
         #     initial="monocular",
         # )
-        dlg.addField("eye", "Eye tracked:", choices=["left", "right", "both"])
+        dlg.addField("eye", "Eye tracked:", choices=["left", "right"])
         dlg.addField(key="eye_screen_dist", label="Eye to Screen Distance (mm):")
 
         # ! IMPLEMENT: validate fields -> subj_id should be required
@@ -282,10 +283,13 @@ def terminate_task(
     file_to_retrieve: The EDF on the Host that we would like to download
     win: the current window used by the experimental script
     """
-    session_dir = Path(session_dir)
+    print("TERMINATING TASK, SENDING 'experiment_end'...", end="")
+
     event_name = "experiment_end"
     record_event(event_name, eeg_device, eye_tracker)
+    print("DONE")
 
+    session_dir = Path(session_dir)
     eye_tracker.get_file(sess_info["edf_file"], session_dir)
     eye_tracker.disconnect(session_dir)
     eye_tracker.edf2asc(session_dir / sess_info["edf_file"])
@@ -434,10 +438,10 @@ def main(results_dir, sequences_file):
         # config_dir / "images/original",
         config_dir / "images/standardized",
         wd / "images",
-        size=(160, 160),
+        size=(256, 256),
     )
 
-    print(f"{imgs_info = }")
+    # print(f"{imgs_info = }")
 
     images = {img_path.stem: img_path for img_path in img_dir.iterdir()}
     icon_names = list(images.keys())
@@ -456,7 +460,7 @@ def main(results_dir, sequences_file):
     )
 
     sess_info.update({"window_size": window_size, "img_size": img_size, "Notes": ""})
-    
+
     with open(sess_info_file, "w") as f:
         json.dump(sess_info, f)
 
@@ -482,9 +486,9 @@ def main(results_dir, sequences_file):
             color=[0, 0, 0],
             units="pix",
         )
-        win.mouseVisible = False
-        win.winHandle.set_mouse_visible(False)
-        win.winHandle.set_mouse_position(-1, -1)
+        # win.mouseVisible = False
+        # win.winHandle.set_mouse_visible(False)
+        # win.winHandle.set_mouse_position(-1, -1)
 
         win_flip(win)
 
@@ -538,10 +542,11 @@ def main(results_dir, sequences_file):
             abort_decision = abort_trial(
                 win, eeg_device, eye_tracker
             )  # , sess_data, sess_info, session_dir)
+
             if abort_decision == "abort":
-                win.close()
-                core.quit()
-                sys.exit()
+                terminate_task(
+                    win, eeg_device, eye_tracker, sess_data, sess_info, session_dir
+                )
 
         y_pos = [-img_size[1], img_size[1]]
         y_pos_choices, y_pos_sequence = y_pos

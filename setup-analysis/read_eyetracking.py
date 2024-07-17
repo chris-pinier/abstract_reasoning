@@ -28,7 +28,6 @@ sess_dir = wd.parent / "experiment-Lab/results/raw/subj_00/sess_03/"
 et_fpath = sess_dir / "cp0003.asc"
 eeg_fpath = sess_dir / "cp0003.bdf"
 
-
 # * #################### EYE TRACKING ####################
 screen_resolution = exp_config["local"]["monitor"]["resolution"]
 
@@ -49,7 +48,6 @@ y_pos = raw_et[chan_ypos][0][0]
 
 # Read events from annotations
 et_events, et_events_dict = mne.events_from_annotations(raw_et)
-
 print("Unique event IDs before update:", np.unique(et_events[:, 2]))
 
 # Convert keys to strings (if they aren't already)
@@ -73,10 +71,17 @@ for i in range(et_events.shape[0]):
     if old_id in id_mapping:
         et_events[i, 2] = id_mapping[old_id]
 
+print("Unique event IDs after update:", np.unique(et_events[:, 2]))
+
+
 # Update et_events_dict with new IDs
 et_events_dict = {k: id_mapping[v] for k, v in et_events_dict.items()}
 et_events_dict_inv = {v: k for k, v in et_events_dict.items()}
 
+inds_responses = np.where(np.isin(et_events[:, 2], [11, 12, 13, 14, 61, 64]))
+responses = et_events[inds_responses]
+n_responses = int(np.sum(np.diff(inds_responses) > 2))
+print(f"{n_responses = }")
 
 # print("ID Mapping:", id_mapping)
 # print("Updated et_events_dict:", et_events_dict)
@@ -86,7 +91,7 @@ et_events_dict_inv = {v: k for k, v in et_events_dict.items()}
 # Find trial start and end events
 trial_start_inds = np.where(et_events[:, 2] == valid_events["trial_start"])[0]
 choice_onset_inds = np.where(et_events[:, 2] == valid_events["stim-all_stim"])[0]
-trial_end_inds = np.where(et_events[:, 2] == valid_events["trial_end"])[0]
+trial_end_inds = np.where(et_events[:, 2] == valid_events["trial_aborted"])[0]
 
 choice_onset_inds = choice_onset_inds[:-1]  # ! TEMP
 
@@ -103,11 +108,11 @@ manual_epochs = []
 
 # Loop through each trial
 for start, end in zip(trial_start_inds, trial_end_inds):
-# for start, end in zip(choice_onset_inds, trial_end_inds):
-# for start, end in zip(trial_start_inds, choice_onset_inds):
+    # for start, end in zip(choice_onset_inds, trial_end_inds):
+    # for start, end in zip(trial_start_inds, choice_onset_inds):
     # Get start and end times in seconds
     start_time = et_events[start, 0] / raw_et.info["sfreq"] - 0.5
-    end_time = et_events[end, 0] / raw_et.info["sfreq"] # + 0.5
+    end_time = et_events[end, 0] / raw_et.info["sfreq"]  # + 0.5
 
     # Crop the raw data to this time window
     epoch_data = raw_et.copy().crop(tmin=start_time, tmax=end_time)
@@ -288,8 +293,16 @@ fig = plot_eye_movements(
 # Now let's plot for each epoch
 eye_mvmts_figs = []
 for i, epoch in enumerate(manual_epochs):
-    fig = plot_eye_movements(epoch,tracked_eye, x_pos_stim, y_pos_choices, y_pos_sequence, screen_resolution, img_size)
-    plt.savefig(f'eye_movements_trial_{i+1}.png', dpi=300)
+    fig = plot_eye_movements(
+        epoch,
+        tracked_eye,
+        x_pos_stim,
+        y_pos_choices,
+        y_pos_sequence,
+        screen_resolution,
+        img_size,
+    )
+    plt.savefig(f"eye_movements_trial_{i+1}.png", dpi=300)
     plt.close(fig)
     eye_mvmts_figs.append(fig)
 # * #################### EEG  ####################
@@ -313,13 +326,14 @@ valid_events_inv = {v: k for k, v in valid_events.items()}
 # np.where(eeg_events[:, 2] == valid_events["m"])[0].shape
 # np.where(et_events[:, 2] == valid_events["m"])[0].shape
 
-np.unique(et_events[:, 2],  return_counts=True)
+np.unique(et_events[:, 2], return_counts=True)
+
 
 def align_eeg_et(eeg_events, et_events):
-    start_eeg = np.where(eeg_events[:, 2] == valid_events['exp_start'])[0]
+    start_eeg = np.where(eeg_events[:, 2] == valid_events["exp_start"])[0]
     start_et = np.where(et_events[:, 2] == valid_events["exp_start"])[0]
 
-    end_eeg = np.where(eeg_events[:, 2] == valid_events['experiment_end'])[0]
+    end_eeg = np.where(eeg_events[:, 2] == valid_events["experiment_end"])[0]
     end_et = np.where(et_events[:, 2] == valid_events["experiment_end"])[0]
     np.unique(et_events[:, 2], return_counts=True)
 

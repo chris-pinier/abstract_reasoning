@@ -27,9 +27,7 @@ disabled_funcs = {
     "EyeTracker.setup": [False, None],
     "EyeTracker.edf2asc": [False, None],
 }
-# disabled_funcs = {k: [True, f"DUMMY {k}"] for k in disabled_funcs.keys()}
-disabled_funcs = {k: [True, None] for k in disabled_funcs.keys()}
-# ! TEMPORARY
+# disabled_funcs = {k: [True, f"DUMMY {k}"] for k in disabled_funcs.keys()} # ! TEMPORARY
 
 
 @dataclass
@@ -89,6 +87,7 @@ class EyeTracker:
     def connect(self) -> None:
         try:
             self.device = pylink.EyeLink(self.ip_address)
+            print("Eye Tracking device connected")
         except RuntimeError as error:
             print("encountered when trying to connect to EyeLink.\nERROR:", error)
             core.quit()
@@ -100,7 +99,7 @@ class EyeTracker:
         #     raise RuntimeError("The eye-tracker is not connected.")
 
         if self.device.isRecording():
-            pylink.pumpDelay(100)
+            pylink.pumpDelay(200)
             self.device.stopRecording()
 
         if local_dir:
@@ -383,7 +382,7 @@ class EyeTracker:
         # el_tracker.sendCommand(f"binocular_enabled = {binocular_tracking}")
         self.device.sendCommand(f"active_eye = {eye}")
 
-        self.device.sendCommand("sample_rate 1000")
+        self.device.sendCommand("sample_rate 2000")
 
         # * Choose a calibration type, H3, HV3, HV5, HV13 (HV = horizontal/vertical),
         self.device.sendCommand("calibration_type = HV9")
