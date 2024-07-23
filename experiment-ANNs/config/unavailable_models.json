@@ -1,0 +1,6 @@
+{
+    "Meta Llama 3 70B Instruct": "Error code: 404 - {\"message\": \"Unable to access model Meta Llama 3 70B Instruct. Please visit https://api.together.xyz to see the list of supported models or contact the owner to request access.\", \"type_\": \"invalid_request_error\", \"param\": null, \"code\": \"model_not_found\"}",
+    "Meta Llama 3 8B Instruct": "Error code: 404 - {\"message\": \"Unable to access model Meta Llama 3 8B Instruct. Please visit https://api.together.xyz to see the list of supported models or contact the owner to request access.\", \"type_\": \"invalid_request_error\", \"param\": null, \"code\": \"model_not_found\"}",
+    "Meta Llama 3 8B": "Error code: 404 - {\"message\": \"Unable to access model Meta Llama 3 8B. Please visit https://api.together.xyz to see the list of supported models or contact the owner to request access.\", \"type_\": \"invalid_request_error\", \"param\": null, \"code\": \"model_not_found\"}",
+    "Meta Llama 3 70B": "Error code: 404 - {\"message\": \"Unable to access model Meta Llama 3 70B. Please visit https://api.together.xyz to see the list of supported models or contact the owner to request access.\", \"type_\": \"invalid_request_error\", \"param\": null, \"code\": \"model_not_found\"}"
+}

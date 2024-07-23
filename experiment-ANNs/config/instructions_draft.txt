@@ -1,0 +1,110 @@
+You are going to be presented with a sequence of words arranged in a logical order. 
+Your goal is to continue the sequence by replacing the "?" with the correct word out of four available options. 
+Each word in the sequence is mapped to a 3 digit number. Here are all the possible words and their corresponding numbers:
+- baby-carriage: 101
+- bone: 102
+- camera: 103
+- eye: 104
+- gamepad: 105
+- home: 106
+- lock: 107
+- megaphone: 108
+- plane-alt: 109
+- shopping_cart: 110
+- smile: 111
+- wheat: 112
+
+First, convert the words to their associated numbers and then find the pattern in the sequence to determine the correct answer. 
+Only respond with the number associated with the correct answer and no other word or text. 
+
+Here is an example:
+----
+Sequence: smile, eye, smile, eye, smile, ?
+Choices: camera, eye, bone, smile
+
+converting the sequence and choices to numbers gives the following:
+Sequence: 111, 104, 111, 104, 111, ?
+Choices: 103, 104, 102, 111
+-----
+
+In this example, the correct answer is "eye" because the sequence is alternating between "smile" and "eye". The answer should thus be "111", which corresponds to "eye".
+
+########################################################################################
+
+You are going to be presented with sequences of words arranged in a logical order.
+Your goal is to continue the sequence with the correct word out of four options available.
+Do not use any external tool to analyze the sequence, reason by yourself to find the pattern in each sequence.
+Only answer with the question number and your answer to the corresponding sequence.
+
+########################################################################################
+
+You are going to be presented with a sequence of words arranged in a logical order. 
+One of the words is missing at the position of the question mark ("?"). 
+Your goal is to replace the question mark with the word that correctly fits the sequence, out of four available options.
+Do not use any external tool to analyze the sequence, reason by yourself to find the underlying pattern in each sequence.
+You can only choose one word out of the four options. Only answer with the correct word, nothing else.
+
+########################################################################################
+
+You are going to be presented with sequences of words arranged in a logical order. 
+Your goal is to continue the sequence with the correct icon out of the four options available. 
+Do not use python or any other tool to analyze the sequence, reason by yourself to find the pattern in each sequence.
+I want you to create a csv file and append each of your answers to it. The csv file must contain two columns, the first one with question number and the second one with your answer to each question.
+
+########################################################################################
+
+You are going to be presented with a sequence of words arranged in a logical order. 
+Your goal is to replace the "?" with the word that correctly fits the sequence out of four available options. 
+Each word in the sequence and available choices is mapped to a 3 digit number. Here are all the possible words and their corresponding numbers:
+{0}
+
+First, convert the words to their associated numbers and then find the pattern in the sequence to determine the correct answer. 
+Only respond with the number associated with the correct answer and no other word or text. 
+
+Here is an example:
+----
+Sequence: {1}
+Choices: {2}
+
+Converting the sequence and choices to numbers gives the following:
+Sequence: {3}
+Choices: {4}
+----
+
+In this example, the correct word is "{5}" because the sequence is alternating between "{6}" and "{7}". The answer should thus be "{8}", which is the number that corresponds to "{9}".
+
+Here is the sequence you must complete, remember that you must only answer with the number associated to the correct word and nothing else:
+
+
+########################################################################################
+
+You will be presented with a sequence of words that follow a logical order, but one word in this sequence is missing, indicated by a question mark (?). Your task is to identify the missing word from a given set of options. To successfully complete this task, you should:
+
+1. Analyze the sequence to understand the underlying logical pattern. Pay attention to the order of words, any repetitions, and how each word relates to the others in the sequence.
+2. Do not rely on external tools or databases to analyze the sequence. Your reasoning should be based solely on the internal logic of the sequence as presented.
+3. Consider the provided options carefully. There is only one correct answer that fits logically into the sequence in place of the question mark.
+4. Present your answer in a clear and concise format: 'Answer: [chosen word]' (without the brackets). Include only your final choice in your response, without any additional explanation or text.
+Here is an example: 
+sequence: word1 word2 word3 word3 word1 word2 word3 ?
+Options: option1 option2 option3 option4
+
+Your goal is to determine which option logically completes the sequence. Remember, the key to solving this puzzle is understanding the pattern that links the words in the sequence. Use this pattern to decide which of the options fits as the missing word."
+
+########################################################################################
+You will be presented with a sequence of words that follow a logical order, but one word in this sequence is missing, indicated by a question mark (?). Your task is to identify the missing word from a given set of options. To successfully complete this task, you should:
+
+1. Analyze the sequence to understand the underlying logical pattern. Pay attention to the order of words, any repetitions, and how each word relates to the others in the sequence.
+2. Do not rely on external tools or databases to analyze the sequence. Your reasoning should be based solely on the internal logic of the sequence as presented.
+3. Consider the provided options carefully. There is only one correct answer that fits logically into the sequence in place of the question mark.
+4. Present your answer in a clear and concise format: 'Answer: [chosen word]' (without the brackets). Include only your final choice in your response, without any additional explanation or text.
+
+Your goal is to determine which option logically completes the sequence. Remember, the key to solving this puzzle is understanding the pattern that links the words in the sequence. Use this pattern to decide which of the options fits as the missing word.
+Here is an example:
+Sequence: smile, eye, smile, eye, smile, ?
+Options: camera, eye, bone, smile
+Answer: eye
+########################################################################################
+
+You are going to be presented with a sequence of words arranged in a logical order.  One of the words is missing, symbolized by a question mark. Your goal is to determine which word, out of four available options, correctly fits the sequence at the location of the question mark. Do not use any external tool to analyze the sequence, reason by yourself to find the underlying logical pattern in the sequence. You can only choose one word out of the four options. Format your answer in the following way: "Answer: [your choice]". Do not include any other text.
+
+########################################################################################
