@@ -12,16 +12,6 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Union
 import pathlib
 
-
-def get_mappings(stims, patterns):
-    stim_IDs = {stim_name: i for i, stim_name in enumerate(sorted(stims))}
-
-    pattern_IDs = sorted(["".join(i[0].replace(" ", "") + i[1]) for i in patterns])
-    pattern_IDs = {pattern: i for i, pattern in enumerate(pattern_IDs)}
-
-    return stim_IDs, pattern_IDs
-
-
 def count_black_pixels(img: Image.Image) -> np.ndarray:
     """
     img: PIL image object, mode: RGBA. Assumes black pixels have alpha value of 255 and

@@ -384,6 +384,10 @@ class EyeTracker:
 
         self.device.sendCommand("sample_rate 2000")
 
+        # Send the command to set the infrared illumination level
+        # illumination_level = 3  # 0-15 # ! CHECK THIS
+        # tracker.sendCommand(f"set_illumination={illumination_level}")
+
         # * Choose a calibration type, H3, HV3, HV5, HV13 (HV = horizontal/vertical),
         self.device.sendCommand("calibration_type = HV9")
 

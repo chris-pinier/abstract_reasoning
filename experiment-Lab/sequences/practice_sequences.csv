@@ -1,0 +1,7 @@
+,item_id,figure1,figure2,figure3,figure4,figure5,figure6,figure7,figure8,choice1,choice2,choice3,choice4,solution,masked_idx,seq_order,choice_order,pattern
+0,8,chess,chess,paw,paw,chess,chess,paw,paw,paw,spade,lock,chess,paw,7,60524371,0231,AABBAABB
+1,48,spade,spade,lock,lock,spade,spade,lock,lock,paw,spade,chess,lock,lock,7,62013457,0321,AABBAABB
+2,3,lock,lock,chess,spade,lock,lock,chess,spade,paw,chess,lock,spade,spade,7,42316570,0312,AABCAABC
+3,28,lock,lock,paw,chess,lock,lock,paw,chess,paw,spade,chess,lock,chess,7,32047516,0213,AABCAABC
+4,42,spade,chess,paw,lock,spade,chess,paw,lock,lock,spade,paw,chess,lock,7,03154672,0132,ABCDABCD
+5,9,chess,paw,spade,lock,chess,paw,spade,lock,chess,paw,spade,lock,lock,7,14673025,3201,ABCDABCD

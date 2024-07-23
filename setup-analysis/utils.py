@@ -15,6 +15,8 @@ from loguru import logger
 from functools import wraps
 from rich import print as rprint
 
+import screeninfo
+
 
 def timer(enabled=True):
     def decorator(func):

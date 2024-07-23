@@ -387,7 +387,7 @@ def load_sequences(session: int, seed: int = None) -> pd.DataFrame:
     return sequences
 
 
-def main(results_dir, sequences_file):
+def main(results_dir, sequences_dir):
     abort = False
 
     # * ################ DIALOG BOX -> PARTICIPANT & SESSION NUMBER ################
@@ -404,6 +404,7 @@ def main(results_dir, sequences_file):
 
     allowed_keys_str = ", ".join(exp_config["local"]["allowed_keys"])
 
+    sequences_file = sequences_dir / f"session_{int(sess_info['sess'])}.csv"
     sequences = pd.read_csv(sequences_file)
     sequences = sequences.sample(frac=1, random_state=0)
 
@@ -436,13 +437,14 @@ def main(results_dir, sequences_file):
 
     imgs_info = prepare_images(
         # config_dir / "images/original",
+        # config_dir / "images/selected_standardized",
         config_dir / "images/standardized",
         wd / "images",
         size=(256, 256),
+        # size = (512, 512),
     )
 
     # print(f"{imgs_info = }")
-
     images = {img_path.stem: img_path for img_path in img_dir.iterdir()}
     icon_names = list(images.keys())
 
@@ -583,7 +585,22 @@ def main(results_dir, sequences_file):
                 avail_choices = list(trial["resp_map"].values())
 
                 intertrial_time = np.random.randint(iti[0], iti[1] + 1, size=1)[0]
-                core.wait(intertrial_time)
+
+                # core.wait(intertrial_time)
+                intertrial_press = event.waitKeys(
+                    maxWait=intertrial_time, keyList=["escape"], clearEvents=True
+                )
+                if intertrial_press:
+                    abort_decision = abort_trial(win, eeg_device, eye_tracker)
+                    if abort_decision == "abort":
+                        abort = True
+                        break
+                    else:
+                        intertrial_press = event.waitKeys(
+                            maxWait=intertrial_time,
+                            keyList=["escape"],
+                            clearEvents=True,
+                        )
 
                 # * Load the sequence images for the current trial
                 sequence_imgs = []
