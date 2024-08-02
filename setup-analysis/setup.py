@@ -21,8 +21,6 @@ os.chdir(wd)
 from utils import get_monitors_info
 
 # from database import Database
-
-
 def get_mapping(items, sort_items=True, both=True) -> List[Dict]:
     if sort_items:
         items = sorted(items)
@@ -73,7 +71,7 @@ def get_sequences(save_dir: Union[str, Path], icons=None, patterns=None):
         ["ABCDE ED", "C"],
     ]
 
-    save_dir = Path(save_dir / "sequences2")
+    save_dir = Path(save_dir / "sequences")
     save_dir.mkdir(exist_ok=True, parents=True)
 
     # * Determine the maximum number of unique characters in any pattern
@@ -189,7 +187,7 @@ def process_permutation(args):
     return combs
 
 
-def get_practice_sequences(sequences):
+def get_practice_sequences(patterns, n_practice=4):
     raise NotImplementedError("This function is not yet implemented.")
 
 
@@ -363,8 +361,8 @@ def get_sequences_mpcsing(save_dir: Union[str, Path], icons=None, patterns=None)
 
 
 # if __name__ == "__main__":
-#     multiprocessing.set_start_method("fork")
-#     sequences = get_sequences_mpcsing(save_dir=Path.cwd())
+    # multiprocessing.set_start_method("fork")
+    # sequences = get_sequences_mpcsing(save_dir=Path.cwd())
 
 # def manage_directories(directories: list, action: str):
 #     for directory in directories:

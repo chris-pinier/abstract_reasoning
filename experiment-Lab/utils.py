@@ -69,7 +69,7 @@ def get_monitors_info():
     return current_monitors
 
 
-def sess_prep(
+def prepare_sess(
     images: Dict[str, str],
     icons: List[str],
     sequences: pd.DataFrame,
@@ -80,22 +80,19 @@ def sess_prep(
 
     assert (
         len(set([Image.open(im).size for im in images.values()])) == 1
-    ), "Images must have same size"
-
-    # solution_mask = "question-mark"
+    ), "Images must have the same size"
 
     img_size = Image.open(images[icons[0]]).size
     x_positions = {}
     resp_mapping = {}
 
-    match_cols_choice = lambda x: re.compile("choice\d{1,2}", re.IGNORECASE).search(x)
-    match_cols_seq = lambda x: re.compile("figure\d{1,2}", re.IGNORECASE).search(x)
+    match_cols_choice = lambda x: re.compile(r"choice\d{1,2}", re.IGNORECASE).search(x)
+    match_cols_seq = lambda x: re.compile(r"figure\d{1,2}", re.IGNORECASE).search(x)
 
     seq_cols = [c for c in sequences.columns if match_cols_seq(c)]
     choice_cols = [c for c in sequences.columns if match_cols_choice(c)]
 
     x_pos_seq = {}
-    # new_sequences = sequences.copy()
 
     for seq_length in range(1, len(seq_cols) + 1):  # * +1 for 0 index
         # * Calculate the total width of images & blank spaces for the item set
@@ -144,6 +141,8 @@ def sess_prep(
         block_trials = sequences.iloc[-remainder:]
         blocks.append(block_trials)
         print(f"WARNING: uneven block sizes: {[len(b) for b in blocks]}")
+    else:
+        blocks = np.array_split(sequences, len(sequences) / block_size)
 
     trial_blocks = []
 
@@ -154,21 +153,22 @@ def sess_prep(
             trial = row.to_dict()
             trial.update(
                 {
-                    "item_id": row["itemid"],
+                    "item_id": row["item_id"],
                     "x_pos": x_positions[idx_row],
                     "resp_map": resp_mapping[idx_row],
-                    "trial_type": "",
                 }
             )
-            trial["seq_order"] = [int(i) for i in trial["seq_order"] if i.isdigit()]
+            trial["seq_order"] = [
+                int(i) for i in str(trial["seq_order"]) if i.isdigit()
+            ]
             trial["choice_order"] = [
-                int(i) for i in trial["choice_order"] if i.isdigit()
+                int(i) for i in str(trial["choice_order"]) if i.isdigit()
             ]
 
             trials.append(trial)
         trial_blocks.append(trials)
 
-    trial_blocks = (block for block in trial_blocks)
+    # trial_blocks = (block for block in trial_blocks)
 
     return trial_blocks
 

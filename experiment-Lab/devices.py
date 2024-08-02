@@ -28,6 +28,7 @@ disabled_funcs = {
     "EyeTracker.edf2asc": [False, None],
 }
 # disabled_funcs = {k: [True, f"DUMMY {k}"] for k in disabled_funcs.keys()} # ! TEMPORARY
+# disabled_funcs = {k: [True, None] for k in disabled_funcs.keys()}  # ! TEMPORARY
 
 
 @dataclass
@@ -97,10 +98,10 @@ class EyeTracker:
     def get_file(self, fname: str, local_dir: str = None) -> None:
         # if not self.device.isConnected():
         #     raise RuntimeError("The eye-tracker is not connected.")
-
-        if self.device.isRecording():
-            pylink.pumpDelay(200)
-            self.device.stopRecording()
+        if self.device.isConnected():
+            if self.device.isRecording():
+                pylink.pumpDelay(200)
+                self.device.stopRecording()
 
         if local_dir:
             local_fpath = str(Path(local_dir) / fname)
@@ -449,14 +450,7 @@ class EyeTracker:
             cmd = f"edf2asc {edf_file}"
         else:
             cmd = f"edf2asc {edf_file} {args}"
-            # TODO: validity check
-            # import subprocess
-            # try:
-            #     subprocess.run([cmd], check=True)
-            # except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            #     raise e("Command does not exists")
         os.system(cmd)
-        # print("DONE")
 
         # * check if the ASCII file was created
         asc_file = Path(str(edf_file).replace(".EDF", ".asc"))

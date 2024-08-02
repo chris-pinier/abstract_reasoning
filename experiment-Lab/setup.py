@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Union
 import pathlib
 
+
 def count_black_pixels(img: Image.Image) -> np.ndarray:
     """
     img: PIL image object, mode: RGBA. Assumes black pixels have alpha value of 255 and
@@ -45,8 +46,8 @@ def prepare_images(
     input_folder = Path(input_folder)
     output_folder = Path(output_folder)
 
-    original_imgs = [im for im in input_folder.glob("*.png")]
-    im_size = Image.open(original_imgs[0]).size
+    # original_imgs = [im for im in input_folder.glob("*.png")]
+    # im_size = Image.open(original_imgs[0]).size
 
     if size is not None:
         target_size = size
@@ -139,6 +140,7 @@ if __name__ == "__main__":
     wd = Path(__file__).parent
     original_imgs = [im for im in (wd.parent / "config/images/original").glob("*.png")]
     img_size = set([Image.open(img).size for img in original_imgs])
+
     if len(img_size) != 1:
         raise ValueError("All images must have the same size.")
     else:

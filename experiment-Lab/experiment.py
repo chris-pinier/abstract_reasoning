@@ -23,7 +23,7 @@ import code
 wd = Path(__file__).parent
 os.chdir(wd)
 from setup import prepare_images
-from utils import sess_prep, get_monitors_info, invert_dict, get_timestamp
+from utils import prepare_sess, get_monitors_info, invert_dict, get_timestamp
 from devices import EEGcap, EyeTracker
 
 comments_desc = {
@@ -62,7 +62,7 @@ img_dir = wd / "images"
 with open(config_dir / "experiment_config.json") as f:
     exp_config = json.load(f)
 
-block_size = 21
+block_size = 20
 
 sequences_file = wd / "sequences/sequences1.csv"
 
@@ -207,46 +207,38 @@ def show_dialogue():
     # loop until we get a valid filename
     while True:
         dlg = gui.Dlg()
-        # dlg.addText(dlg_prompt)
         dlg.addText("Subject info")
         dlg.addField(key="subj_id", label="ID:", required=True)
 
         dlg.addText("Experiment Info")
-        # dlg.addField("group", "Group:", choices=["pilot", "experiment"])
         dlg.addField("sess", "Session:", choices=["1", "2", "3", "4", "5"])
 
         dlg.addText("Eye tracking")
         dlg.addField(key="edf_fname", label="File Name:")
-        # dlg.addField(
-        #     "mode",
-        #     "Tracking mode:",
-        #     choices=["monocular", "binocular"],
-        #     initial="monocular",
-        # )
         dlg.addField("eye", "Eye tracked:", choices=["left", "right"])
         dlg.addField(key="eye_screen_dist", label="Eye to Screen Distance (mm):")
 
         # ! IMPLEMENT: validate fields -> subj_id should be required
 
-        # show dialog and wait for OK or Cancel
-        ok_data = dlg.show()
+        # * show dialog and wait for OK or Cancel
+        sess_info = dlg.show()
 
-        if dlg.OK:  # if ok_data is not None
-            print(f"EDF data filename: {ok_data['edf_fname']}.EDF")
+        if dlg.OK:  # * if sess_info is not None
+            print(f"EDF data filename: {sess_info['edf_fname']}.EDF")
         else:
             print("user cancelled")
             core.quit()
             sys.exit()
 
-        # get the string entered by the experimenter
-        tmp_str = dlg.data["edf_fname"]
-        # strip trailing characters, ignore the ".edf" extension
-        edf_fname = tmp_str.rstrip().split(".")[0]
+        # * strip trailing characters, ignore the ".edf" extension
+        # tmp_str = dlg.data["edf_fname"]
+        # edf_fname = tmp_str.rstrip().split(".")[0]
+        edf_fname = dlg.data["edf_fname"].rstrip().split(".")[0]
 
         # if dlg.data["subj_id"] == "":
         #     print("ERROR: Subject ID is required")
 
-        # check if the filename is valid (length <= 8 & no special char)
+        # * check if the filename is valid (length <= 8 & no special char)
         allowed_char = ascii_letters + digits + "_"
 
         edf_name_conds = [
@@ -261,13 +253,15 @@ def show_dialogue():
         else:
             break
 
-    ok_data["edf_file"] = f"{edf_fname}.EDF"
-    ok_data["subj_id"] = str(ok_data["subj_id"]).zfill(2)
-    ok_data["sess"] = str(ok_data["sess"]).zfill(2)
-    ok_data["date"] = get_timestamp("%Y%m%d_%H%M%S")
-    ok_data["sess_id"] = f"{ok_data['subj_id']}-{ok_data['sess']}-{ok_data['date']}"
+    sess_info["edf_file"] = f"{edf_fname}.EDF"
+    sess_info["subj_id"] = str(sess_info["subj_id"]).zfill(2)
+    sess_info["sess"] = str(sess_info["sess"]).zfill(2)
+    sess_info["date"] = get_timestamp("%Y%m%d_%H%M%S")
+    sess_info["sess_id"] = (
+        f"{sess_info['subj_id']}-{sess_info['sess']}-{sess_info['date']}"
+    )
 
-    return ok_data
+    return sess_info
 
 
 def terminate_task(
@@ -452,7 +446,7 @@ def main(results_dir, sequences_dir):
 
     assert int(window_size[1] / img_size[1]) >= height_factor, "Window height too small"
 
-    trial_blocks = sess_prep(
+    trial_blocks = prepare_sess(
         images=images,
         icons=icon_names,
         sequences=sequences,
@@ -497,6 +491,9 @@ def main(results_dir, sequences_dir):
         # TODO: fix this
         if not (refresh_rate := exp_config["local"]["monitor"].get("refresh_rate")):
             refresh_rate = win.getActualFrameRate()
+            print(
+                "WARNING: Refresh rate different from the one specified in config file"
+            )
             print(f"Measured frame rate: {refresh_rate} Hz")
 
         print(f"Configured refresh rate: {refresh_rate} Hz")
@@ -525,6 +522,10 @@ def main(results_dir, sequences_dir):
             text="+",
             height=0.05 * window_size[1],
         )
+
+        # * ################ Run practice trials ################
+        # if int(sess_info["sess"]) == 1:
+        #     raise NotImplementedError("Practice trials not implemented yet")
 
         # * Welcome message
         instr1 = """You are going to solve {n} abstract reasoning problems. Your goal is to continue the sequence in the top row with one of the four options in the bottom row.
