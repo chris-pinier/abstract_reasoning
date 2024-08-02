@@ -3,7 +3,7 @@
     "expName": "Experiment_1-EasyAnalogy",
     "database_path": "./config/database.db",
     "timings": {
-      "feedback_duration": 2,
+      "feedback_duration": 4,
       "intertrial_interval": [
         1,
         3

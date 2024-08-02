@@ -1,9 +1,5 @@
 from pathlib import Path
 import sys
-import time
-
-# import pylink
-import os
 from psychopy import visual, core, event, logging, monitors, gui
 from string import ascii_letters, digits
 import sys
@@ -12,20 +8,18 @@ from icecream import ic
 import numpy as np
 import pandas as pd
 from PIL import Image
-
+from typing import Dict, List, Tuple, Union
+from collections import namedtuple
+import code
+import traceback
 # import platform
 # import re
 # import inspect
 # import pickle
-from typing import Dict, List, Tuple, Union
-from collections import namedtuple
-
 # from tqdm.auto import tqdm
-import code
-import traceback
-
-wd = Path(__file__).parent
-os.chdir(wd)
+# import time
+# import pylink
+# import os
 from setup import prepare_images
 from utils import prepare_sess, get_monitors_info, invert_dict, get_timestamp
 from devices import EEGcap, EyeTracker
@@ -55,9 +49,10 @@ fullscr = True
 
 # icecream config
 ic.configureOutput(includeContext=False, prefix="")
+# ic.enable()
+ic.disable()
 
-
-wd = Path(__file__).parent
+wd = Path.cwd()
 results_dir = wd / "results/raw"
 results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -70,9 +65,20 @@ img_dir = wd / "images"
 with open(config_dir / "experiment_config.json") as f:
     exp_config = json.load(f)
 
-block_size = 3
+block_size = 20
 
 timings = exp_config["global"]["timings"]
+# ! TEMP
+timings = {
+    'feedback_duration': 0,
+    'intertrial_interval': [0, 0],
+    'pres_duration': 0.01,
+    'pre_pres_duration': None,
+    'resp_window': 1
+    }
+
+# ! TEMP
+
 timings = namedtuple("Timings", timings.keys())(*timings.values())
 iti = timings.intertrial_interval
 
@@ -83,6 +89,7 @@ allowed_keys_str = ", ".join(allowed_keys)
 
 refresh_rate = exp_config["local"]["monitor"].get("refresh_rate")
 
+trial_count = 0
 
 # * ####################################################################################
 # * INSTRUCTIONS & MESSAGES
@@ -192,8 +199,7 @@ def display_images_sequentially(
 
     Note: Either pres_duration or pres_frames must be specified, but not both.
     """
-    win.mouseVisible = False
-    win.winHandle.set_mouse_visible(False)
+    # * Clear the screen
     win_flip(win)
 
     assert bool(pres_duration) ^ bool(
@@ -407,7 +413,7 @@ def terminate_exp(
     win.close()
 
     # * Enter interactive mode
-    code.interact(local=dict(globals(), **locals()), banner="Interactive mode")
+    code.interact(local=dict(globals(), **locals()), banner="Interactive mode. quit with: exit()")
 
     # * quit PsychoPy
     core.quit()
@@ -438,11 +444,11 @@ def abort_trial(
         win,
         text=messages["abort_trial"],
         keys=["return", "escape"],
-    )
+    )[0]
 
-    if choice[0] == "escape":
+    if choice == "escape":
         return "abort"
-    elif choice[0] == "return":
+    elif choice == "return":
         return "continue"
 
 
@@ -505,22 +511,10 @@ def get_practice_sequences():
 
     return practice_df
 
-
-def custom_wait(win, duration, keys: list = None, clear=False):
-    timer = core.CountdownTimer(duration)
-    while timer.getTime() > 0:
-        pass
-        # win_flip(win, clear=False)
-        # keypress = event.getKeys(keyList=keys)
-        # if keypress:
-        #     return keypress
-    return None
-
-
 def run_trial(
     win: visual.window.Window,
     trial: dict,
-    trialN: int,
+    # trialN: int,
     images,  # TODO: type hint
     img_size,  # TODO: type hint
     eeg_device: EEGcap,
@@ -536,7 +530,7 @@ def run_trial(
     Parameters:
     win (visual.window.Window): The psychopy window object.
     trial (dict): The trial information.
-    trialN (int): The trial number.
+    # trialN (int): The trial number. #TODO: Remove if not used
     images: Dictionary mapping image names to file paths.
     img_size: The size of the images.
     eeg_device (EEGcap): The EEG device object.
@@ -594,7 +588,6 @@ def run_trial(
 
     record_event("trial_start", eeg_device, eye_tracker)
 
-    win_flip(win)
     core.wait(1)
     win_flip(win)
 
@@ -702,7 +695,7 @@ def run_trial(
     record_event("trial_end", eeg_device, eye_tracker)
 
     trial_data = {
-        "trial_idx": trialN,
+        # "trial_idx": trialN,
         "subj_id": sess_info["subj_id"],
         "trial_type": trial["trial_type"],
         "item_id": trial["item_id"],
@@ -948,8 +941,10 @@ def run_trials(
     sess_info,
     session_dir,
 ):
-    for trialN, trial in enumerate(trials):
-        ic(trialN)
+    for trial in trials:
+        # trial_count += 1
+        # trialN = trial_count
+
         # * Display the fixation cross in the middle of the screen
         fix_cross.draw()
         win_flip(win)
@@ -975,18 +970,22 @@ def run_trials(
                 )
             else:
                 # * Continue the experiment
+                core.wait(1)
+
+                fix_cross.draw()
+                win_flip(win)
+
                 intertrial_press = event.waitKeys(
                     maxWait=intertrial_time,
                     keyList=["escape"],
                     clearEvents=True,
                 )
 
-        win_flip(win)
 
         trial_data = run_trial(
             win,
             trial,
-            trialN,
+            # trialN,
             images,
             img_size,
             eeg_device,
@@ -1004,9 +1003,11 @@ def run_trials(
                 win, eeg_device, eye_tracker, sess_data, sess_info, session_dir
             )
         else:
-            sess_data[trialN] = {"blockN": blockN}
-            sess_data[trialN].update(trial_data)
-            sess_data[trialN].update({"intertrial_time": intertrial_time})
+            trial_data.update({"blockN":blockN, "iti":intertrial_time})
+            sess_data.append(trial_data)
+            # sess_data[trialN] = {"blockN": blockN}
+            # sess_data[trialN].update(trial_data)
+            # sess_data[trialN].update({"intertrial_time": intertrial_time})
 
 
 def main():
@@ -1037,8 +1038,11 @@ def main():
     # * Send signal to EEG amplifier & eye tracker to indicate start of experiment
     record_event("exp_start", eeg_device, eye_tracker)
 
-    practice_data = {}
-    sess_data = {}
+    # practice_data = {}
+    # sess_data = {}
+
+    practice_data = []
+    sess_data = []
 
     try:
         # * Main experiment loop
@@ -1123,7 +1127,7 @@ def main():
             keys=["return"],
         )
 
-        print(traceback.format_exc())
+        print(traceback.format_exc(), "\n\n")
 
         # * Abort the experiment
         terminate_exp(win, eeg_device, eye_tracker, sess_data, sess_info, session_dir)

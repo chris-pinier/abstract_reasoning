@@ -64,7 +64,7 @@ def get_sequences(save_dir: Union[str, Path], icons=None, patterns=None):
         ["AAAB AAA", "B"],
         ["ABAB CDC", "D"],
         ["ABBA ABB", "A"],
-        ["ABBA CDC", "D"],
+        ["ABBA CDD", "C"],
         ["ABBC ABB", "C"],
         ["ABCA ABC", "A"],
         ["ABCD DCB", "A"],
