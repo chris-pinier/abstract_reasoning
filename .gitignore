@@ -4,23 +4,24 @@ logs/*
 draft/*
 drafts/*
 jobs/*
+eyetracking/
+archive/
 
 # * ######## global config ########
-global_config/draft/
-global_config/database.db
-global_config/images_info.xslx
+config/draft/*
+config/database.db
+config/images_info.xslx
 
-global_config/images/*
-!global_config/images/original/
-!global_config/images/original/*
+
 # * ######## ANNs ########
-ANNs/config/*
+experiment-ANNs/config/*
 !ANNs/config/.gitkeep
 
-ANNs/results/*
-!ANNs/results/.gitkeep
+experiment-ANNs/results/*
+!experiment-ANNs/results/.gitkeep
 
-ANNs/draft/*
+experiment-ANNs/draft/*
+
 # * ######## Local ########
 experiment-Lab/draft/*
 !experiment-Lab/draft/.gitkeep
@@ -58,8 +59,6 @@ experiment-Online/logs/*
 # .vscode
 .secrets
 private.*
-eyetracking/
-archive/
 
 # ! ########### APPLE OS SPECIFIC ########### ! # 
 .DS_Store
