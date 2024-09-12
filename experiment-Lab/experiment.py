@@ -1,6 +1,6 @@
 from pathlib import Path
 import sys
-from psychopy import visual, core, event, logging, monitors, gui
+from psychopy import visual, core, event, monitors, gui
 from string import ascii_letters, digits
 import sys
 import json
@@ -12,14 +12,6 @@ from typing import Dict, List, Tuple, Union
 from collections import namedtuple
 import code
 import traceback
-# import platform
-# import re
-# import inspect
-# import pickle
-# from tqdm.auto import tqdm
-# import time
-# import pylink
-# import os
 from setup import prepare_images
 from utils import prepare_sess, get_monitors_info, invert_dict, get_timestamp
 from devices import EEGcap, EyeTracker
@@ -47,7 +39,7 @@ config_check = True
 
 fullscr = True
 
-# icecream config
+# * icecream config
 ic.configureOutput(includeContext=False, prefix="")
 # ic.enable()
 ic.disable()
@@ -94,38 +86,70 @@ trial_count = 0
 # * ####################################################################################
 # * INSTRUCTIONS & MESSAGES
 # * ####################################################################################
-
 messages = {
     "welcome": (
-        "You are going to solve {n} abstract reasoning problems. Your goal is to "
-        "continue the sequence in the top row with one of the four options in the "
-        "bottom row.\n"
-        "Use the {keys} keys to select one of these options from left to right.\n"
-        "Place your fingers on the keys and press one of them to start."
+        "Welcome to the Abstract Reasoning Experiment.\n\n"
+        "In this study, you will solve {n} problems involving sequences of black icons.\n\n"
+        "For each problem:\n"
+        "\t1. A row of icons will appear at the top of the screen\n"
+        "\t2. Your task is to determine the pattern in this sequence\n"
+        "\t3. Four options will appear below the sequence\n"
+        "\t4. Choose the option that best continues the sequence\n"
+        "\t5. Use the {keys} keys to select your answer (from left to right)\n\n"
+        "Note:"
+        "\t1. Icons from sequence will briefly flash one-by-one in the top row\n"
+        "\t2. Then, icons to choose from will briefly flash one-by-one in the bottom row\n"
+        "\t3. Next, all icons will appear together (top and bottom rows) and stay on the screen until you make a decision\n"
+        "Tips:\n"
+        "\t- Try to respond as quickly and accurately as possible\n"
+        "\t- Keep your eyes on the center of the screen between trials\n"
+        "\t- Minimize head movements throughout the experiment\n\n"
+        "Place your fingers on the {keys} keys now.\n"
+        "Press any of these keys when you're ready to begin."
     ),
-    "practice_start": ("Practice block.\n" "Press any of the {keys} keys to start."),
+    "practice_start": (
+        "Practice Round\n\n"
+        "Let's start with a few practice problems.\n"
+        "During this practice, you will receive feedback on your answers.\n"
+        "Remember to use the {keys} keys to select your answers.\n"
+        "Press any of these keys when you're ready to begin."
+    ),
     "practice_end": (
-        "Practice block completed.\n"
-        "Place your fingers on the {keys} keys and press one of them to start."
+        "Practice Completed\n\n"
+        "Great job! You're now ready for the main experiment.\n"
+        "Please note: From now on, you will not receive feedback on your answers.\n"
+        "Remember to use the {keys} keys to select your answers.\n"
+        "Press any of these keys when you're ready to start the main experiment."
     ),
     "block_end": (
-        "End of block {blockN}\nTake a break\n"
-        "Place your fingers on the {keys} keys and press one of them to continue."
+        "Block {blockN} Completed\n\n"
+        "Well done! You may take a short break now.\n"
+        "During the experiment, please try to minimize your movements.\n"
+        "Only move your fingers to respond and try to keep your head still.\n"
+        "When you're ready to continue, place your fingers on the {keys} keys\n"
+        "and press any of them to begin the next block."
     ),
-    "end": "End of experiment. Thank you for participating!\nPress enter to quit",
+    "end": (
+        "Experiment Completed\n\n"
+        "Thank you for your participation!\n"
+        "Press Enter to finish and exit."
+    ),
     "abort_trial": (
-        "Trial aborted.\n"
-        "To continue the experiment: press any of the {keys} keys.\n"
-        "To quit the experiment: press 'escape'."
+        "Trial Paused\n\n"
+        "To resume the experiment: Press any of the {keys} keys\n"
+        "To quit the experiment: Press 'Escape'"
     ),
-    "timeout": "Timeout",
+    "timeout": "Time's up! Please try to respond more quickly on the next trial.",
     "invalid_key": (
-        "Invalid key pressed!\n"
-        "Place your fingers on the {keys} keys and press one of them to continue."
+        "Oops! You pressed an invalid key.\n"
+        "Please use only the {keys} keys to respond.\n"
+        "Press any of these keys to continue."
     ),
     "error": (
-        "An unexpected error occurred. Please contact the experimenter.\n"
-        "Press enter to save the data and quit."
+        "Technical Difficulty\n\n"
+        "An unexpected error has occurred.\n"
+        "Please alert the experimenter.\n"
+        "Press Enter to save your progress and exit."
     ),
 }
 
@@ -316,6 +340,8 @@ def show_dialogue() -> dict:
     while True:
         dlg = gui.Dlg()
         dlg.addText("Subject info")
+        dlg.addField(key="age", label="age:", required=True)
+        dlg.addField(key="gender", label="gender:", required=True)
         dlg.addField(key="subj_id", label="ID:", required=True)
 
         dlg.addText("Experiment Info")
@@ -417,7 +443,9 @@ def terminate_exp(
     win.close()
 
     # * Enter interactive mode
-    code.interact(local=dict(globals(), **locals()), banner="Interactive mode. quit with: exit()")
+    code.interact(
+        local=dict(globals(), **locals()), banner="Interactive mode. quit with: exit()"
+    )
 
     # * quit PsychoPy
     core.quit()
@@ -518,6 +546,7 @@ def modify_seq_csv():
     #     df['seq_order'] = seq_orders
 
     #     df.to_csv(fpath, index=False)
+
 
 def run_trial(
     win: visual.window.Window,
@@ -989,7 +1018,6 @@ def run_trials(
                     clearEvents=True,
                 )
 
-
         trial_data = run_trial(
             win,
             trial,
@@ -1011,7 +1039,7 @@ def run_trials(
                 win, eeg_device, eye_tracker, sess_data, sess_info, session_dir
             )
         else:
-            trial_data.update({"blockN":blockN, "iti":intertrial_time})
+            trial_data.update({"blockN": blockN, "iti": intertrial_time})
             sess_data.append(trial_data)
             # sess_data[trialN] = {"blockN": blockN}
             # sess_data[trialN].update(trial_data)
