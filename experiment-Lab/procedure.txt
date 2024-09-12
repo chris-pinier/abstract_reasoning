@@ -1,0 +1,6 @@
+Experimental Procedure
+
+Checks:
+    - monitor's location on table
+    - Eye Tracker's location on table
+    - room's brightness

@@ -1,0 +1,7 @@
+item_id,figure1,figure2,figure3,figure4,figure5,figure6,figure7,figure8,choice1,choice2,choice3,choice4,solution,masked_idx,seq_order,choice_order,pattern,trial_type
+8,chess,chess,paw,paw,chess,chess,paw,paw,paw,spade,lock,chess,paw,7,14605732,0312,AABBAABB,practice
+48,spade,spade,lock,lock,spade,spade,lock,lock,paw,spade,chess,lock,lock,7,71435026,0231,AABBAABB,practice
+3,lock,lock,chess,spade,lock,lock,chess,spade,paw,chess,lock,spade,spade,7,10735426,0132,AABCAABC,practice
+28,lock,lock,paw,chess,lock,lock,paw,chess,paw,spade,chess,lock,chess,7,36472501,1230,AABCAABC,practice
+42,spade,chess,paw,lock,spade,chess,paw,lock,lock,spade,paw,chess,lock,7,35167240,3120,ABCDABCD,practice
+9,chess,paw,spade,lock,chess,paw,spade,lock,chess,paw,spade,lock,lock,7,31426705,3120,ABCDABCD,practice

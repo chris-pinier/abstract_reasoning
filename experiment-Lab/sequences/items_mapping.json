@@ -1,0 +1,30 @@
+{
+    "stim_IDs": {
+        "bell": 0,
+        "bulb": 1,
+        "carrot": 2,
+        "cube": 3,
+        "eye": 4,
+        "guitar": 5,
+        "hammer": 6,
+        "heart": 7,
+        "helicopter": 8,
+        "key": 9,
+        "pyramid": 10,
+        "smile": 11,
+        "star": 12,
+        "sun": 13,
+        "truck": 14,
+        "wheat": 15
+    },
+    "pattern_IDs": {
+        "AAABAAAB": 0,
+        "ABABCDCD": 1,
+        "ABBAABBA": 2,
+        "ABBACDDC": 3,
+        "ABBCABBC": 4,
+        "ABCAABCA": 5,
+        "ABCDDCBA": 6,
+        "ABCDEEDC": 7
+    }
+}
