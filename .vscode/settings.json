@@ -1,0 +1,12 @@
+{
+    "interactiveWindow.executeWithShiftEnter": true,
+    "editor.formatOnSave": true,
+    "[python]": {
+        "editor.rulers": [
+            {
+                "column": 88,
+                // "color": "#ff00FF"
+            },
+        ]
+    }
+}
