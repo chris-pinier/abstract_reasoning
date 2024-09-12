@@ -87,45 +87,24 @@ trial_count = 0
 # * INSTRUCTIONS & MESSAGES
 # * ####################################################################################
 messages = {
-    "welcome": (
-        "Welcome to the Abstract Reasoning Experiment.\n\n"
-        "In this study, you will solve {n} problems involving sequences of black icons.\n\n"
-        "For each problem:\n"
-        "\t1. A row of icons will appear at the top of the screen\n"
-        "\t2. Your task is to determine the pattern in this sequence\n"
-        "\t3. Four options will appear below the sequence\n"
-        "\t4. Choose the option that best continues the sequence\n"
-        "\t5. Use the {keys} keys to select your answer (from left to right)\n\n"
-        "Note:"
-        "\t1. Icons from sequence will briefly flash one-by-one in the top row\n"
-        "\t2. Then, icons to choose from will briefly flash one-by-one in the bottom row\n"
-        "\t3. Next, all icons will appear together (top and bottom rows) and stay on the screen until you make a decision\n"
-        "Tips:\n"
-        "\t- Try to respond as quickly and accurately as possible\n"
-        "\t- Keep your eyes on the center of the screen between trials\n"
-        "\t- Minimize head movements throughout the experiment\n\n"
-        "Place your fingers on the {keys} keys now.\n"
-        "Press any of these keys when you're ready to begin."
-    ),
     "practice_start": (
         "Practice Round\n\n"
         "Let's start with a few practice problems.\n"
         "During this practice, you will receive feedback on your answers.\n"
         "Remember to use the {keys} keys to select your answers.\n"
-        "Press any of these keys when you're ready to begin."
+        "Press any of these keys to start the practice round."
     ),
     "practice_end": (
         "Practice Completed\n\n"
         "Great job! You're now ready for the main experiment.\n"
-        "Please note: From now on, you will not receive feedback on your answers.\n"
+        "Please note: from now on, you will not receive feedback on your answers.\n"
         "Remember to use the {keys} keys to select your answers.\n"
-        "Press any of these keys when you're ready to start the main experiment."
+        "Press any of these keys to start the main experiment."
     ),
     "block_end": (
         "Block {blockN} Completed\n\n"
-        "Well done! You may take a short break now.\n"
-        "During the experiment, please try to minimize your movements.\n"
-        "Only move your fingers to respond and try to keep your head still.\n"
+        "Well done! You may take a short break now, but keep your head on the chinrest "
+        "and try not too move too much.\n"
         "When you're ready to continue, place your fingers on the {keys} keys\n"
         "and press any of them to begin the next block."
     ),
@@ -135,7 +114,7 @@ messages = {
         "Press Enter to finish and exit."
     ),
     "abort_trial": (
-        "Trial Paused\n\n"
+        "Trial Aborted\n\n"
         "To resume the experiment: Press any of the {keys} keys\n"
         "To quit the experiment: Press 'Escape'"
     ),
@@ -143,7 +122,7 @@ messages = {
     "invalid_key": (
         "Oops! You pressed an invalid key.\n"
         "Please use only the {keys} keys to respond.\n"
-        "Press any of these keys to continue."
+        "Place your fingers on these keys and press any of them to continue."
     ),
     "error": (
         "Technical Difficulty\n\n"
@@ -298,34 +277,72 @@ def get_feedback(
 
     core.wait(duration)
 
-
 def show_msg(
-    win: visual.window.Window, text: str, kwargs: dict = None, keys: list = None
+    win: visual.Window,
+    content: Union[str, Path],
+    kwargs: dict = None,
+    keys: list = None
 ):
     """
-    Displays a message on the psychopy window and optionally waits for a key press.
+    Displays a message or image on the psychopy window and optionally waits for a key press.
 
     Parameters:
-    win (visual.window.Window): The psychopy window object.
-    text (str): The message to be displayed.
-    kwargs (dict, optional): Additional keyword arguments to be passed to visual.TextStim.
+    win (visual.Window): The psychopy window object.
+    content (Union[str, Path]): The message to be displayed or the path to an image file.
+    kwargs (dict, optional): Additional keyword arguments to be passed to visual.TextStim or visual.ImageStim.
     keys (list, optional): List of keys to wait for before continuing.
 
     Returns:
     The pressed key if keys are specified, otherwise None.
     """
-
     win_flip(win)
     kwargs = {} if kwargs is None else kwargs
-    msg = visual.TextStim(win, text, **kwargs)
-    # TODO : color=txt_color, wrapWidth=scn_width / 2)
-    msg.draw()
+
+    if isinstance(content, str):
+        # Content is a string, create a TextStim
+        stim = visual.TextStim(win, text=content, **kwargs)
+    elif isinstance(content, (str, Path)) and Path(content).is_file():
+        # Content is a file path, create an ImageStim
+        stim = visual.ImageStim(win, image=content, **kwargs)
+    else:
+        raise ValueError("Content must be either a string or a valid file path.")
+
+    stim.draw()
     win_flip(win)
 
     if keys:
         pressed_key = event.waitKeys(keyList=keys)
         win_flip(win)
         return pressed_key
+
+
+# def show_msg(
+#     win: visual.window.Window, text: str, kwargs: dict = None, keys: list = None
+# ):
+#     """
+#     Displays a message on the psychopy window and optionally waits for a key press.
+
+#     Parameters:
+#     win (visual.window.Window): The psychopy window object.
+#     text (str): The message to be displayed.
+#     kwargs (dict, optional): Additional keyword arguments to be passed to visual.TextStim.
+#     keys (list, optional): List of keys to wait for before continuing.
+
+#     Returns:
+#     The pressed key if keys are specified, otherwise None.
+#     """
+
+#     win_flip(win)
+#     kwargs = {} if kwargs is None else kwargs
+#     msg = visual.TextStim(win, text, **kwargs)
+#     # TODO : color=txt_color, wrapWidth=scn_width / 2)
+#     msg.draw()
+#     win_flip(win)
+
+#     if keys:
+#         pressed_key = event.waitKeys(keyList=keys)
+#         win_flip(win)
+#         return pressed_key
 
 
 def show_dialogue() -> dict:
@@ -340,8 +357,8 @@ def show_dialogue() -> dict:
     while True:
         dlg = gui.Dlg()
         dlg.addText("Subject info")
-        dlg.addField(key="age", label="age:", required=True)
-        dlg.addField(key="gender", label="gender:", required=True)
+        # dlg.addField(key="age", label="age:", required=True)
+        # dlg.addField(key="gender", label="gender:", required=True)
         dlg.addField(key="subj_id", label="ID:", required=True)
 
         dlg.addText("Experiment Info")
@@ -475,7 +492,7 @@ def abort_trial(
 
     choice = show_msg(
         win,
-        text=messages["abort_trial"].format(keys=allowed_keys_str),
+        messages["abort_trial"].format(keys=allowed_keys_str),
         keys=keys + ["escape"],
     )
 
@@ -708,7 +725,7 @@ def run_trial(
     elif choice_key == "timeout":
         correct = "invalid"
         choice = "invalid"
-        show_msg(win, text=messages["timeout"])
+        show_msg(win, content=messages["timeout"])
         core.wait(timings.feedback_duration)
 
     # * Abort trial during response period
@@ -725,7 +742,7 @@ def run_trial(
         choice = "invalid"
         show_msg(
             win,
-            text=messages["invalid_key"].format(keys=allowed_keys_str),
+            content=messages["invalid_key"].format(keys=allowed_keys_str),
             keys=allowed_keys,
         )
 
@@ -914,7 +931,7 @@ def init_experiment(
 
     show_msg(
         win,
-        text="Press enter twice to start the eye tracker calibration",
+        "Press enter twice to start the eye tracker calibration",
         keys=["return"],
     )
     eye_tracker.calibrate()
@@ -931,7 +948,7 @@ def init_experiment(
     # * Welcome message
     pressed_key = show_msg(
         win,
-        text=messages["welcome"].format(keys=allowed_keys_str, n=n_sequences),
+        Path("welcome_msg.png"),
         keys=allowed_keys + ["escape"],
     )
 
