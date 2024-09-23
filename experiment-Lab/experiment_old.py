@@ -723,15 +723,20 @@ def run_trial(
 
     elif choice_key == "timeout":
         correct = "invalid"
-        # choice = "invalid"
+        choice = "invalid"
         show_msg(win, content=messages["timeout"])
         core.wait(timings.feedback_duration)
 
     # * Abort trial during response period
     elif choice_key == "escape":
         abort_decision = abort_trial(win, eeg_device, eye_tracker, allowed_keys)
-        correct = "invalid"
-        choice = "abort-stop" if abort_decision == "abort" else "abort-continue"
+        if abort_decision == "abort":
+            record_event("trial_end", eeg_device, eye_tracker)
+            record_event("experiment_aborted", eeg_device, eye_tracker)
+            return "abort"
+        else:
+            correct = "invalid"
+            choice = "invalid"
     else:
         correct = "invalid"
         choice = "invalid"
@@ -1008,7 +1013,6 @@ def run_trials(
         if intertrial_press:
             abort_decision = abort_trial(win, eeg_device, eye_tracker, allowed_keys)
             if abort_decision == "abort":
-                record_event("experiment_aborted", eeg_device, eye_tracker)
                 # * Abort the experiment
                 terminate_exp(
                     win,
@@ -1045,18 +1049,18 @@ def run_trials(
             y_pos_choices,
         )
 
-        trial_data.update({"blockN": blockN, "iti": intertrial_time})
-        sess_data.append(trial_data)
-
         # * Abort trial during response period
-        if trial_data["choice"] == "abort-stop":
+        if trial_data == "abort":
             # * Abort the experiment
-            record_event("experiment_aborted", eeg_device, eye_tracker)
             terminate_exp(
                 win, eeg_device, eye_tracker, sess_data, sess_info, session_dir
             )
-        # else:
-        #     sess_data.append(trial_data)
+        else:
+            trial_data.update({"blockN": blockN, "iti": intertrial_time})
+            sess_data.append(trial_data)
+            # sess_data[trialN] = {"blockN": blockN}
+            # sess_data[trialN].update(trial_data)
+            # sess_data[trialN].update({"intertrial_time": intertrial_time})
 
 
 def main():

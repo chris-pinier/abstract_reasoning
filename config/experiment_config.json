@@ -101,7 +101,7 @@
     "stim_folder": null,
     "block_size": null
   },
-  "local": {
+  "lab": {
     "allowed_keys": [
       "a",
       "x",
@@ -121,6 +121,7 @@
       "x": 12,
       "m": 13,
       "l": 14,
+      "timeout": 15,
       "exp_start": 21,
       "experiment_aborted": 22,
       "experiment_end": 23,
