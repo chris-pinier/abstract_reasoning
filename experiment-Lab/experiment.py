@@ -723,7 +723,7 @@ def run_trial(
 
     elif choice_key == "timeout":
         correct = "invalid"
-        # choice = "invalid"
+        choice = "timeout"
         show_msg(win, content=messages["timeout"])
         core.wait(timings.feedback_duration)
 

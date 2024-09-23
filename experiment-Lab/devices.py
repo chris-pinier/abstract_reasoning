@@ -121,7 +121,7 @@ class EyeTracker:
         if self.device.isConnected():
             if self.device.isRecording():
                 # * add 100 ms to catch final trial events
-                pylink.pumpDelay(100)
+                pylink.pumpDelay(200)
                 self.device.stopRecording()
 
             if message is not None:
