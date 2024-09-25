@@ -745,6 +745,7 @@ def run_trial(
             keys=allowed_keys,
         )
 
+    core.wait(0.1)
     record_event("trial_end", eeg_device, eye_tracker)
 
     trial_data = {
@@ -883,7 +884,7 @@ def init_experiment(
 
     # * Delete dataframes to free up memory
     del sequences, practice_sequences
-    
+
     n_blocks = len(trial_blocks)
     trial_blocks = (block for block in trial_blocks)
 
