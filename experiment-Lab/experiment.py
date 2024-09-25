@@ -883,7 +883,8 @@ def init_experiment(
 
     # * Delete dataframes to free up memory
     del sequences, practice_sequences
-
+    
+    n_blocks = len(trial_blocks)
     trial_blocks = (block for block in trial_blocks)
 
     sess_info.update({"window_size": window_size, "img_size": img_size, "Notes": ""})
@@ -969,6 +970,7 @@ def init_experiment(
         session_dir,
         practice_block,
         trial_blocks,
+        n_blocks,
         images,
         y_pos,
         fix_cross,
@@ -1072,6 +1074,7 @@ def main():
         session_dir,
         practice_block,
         trial_blocks,
+        n_blocks,
         images,
         y_pos,
         fix_cross,
@@ -1164,7 +1167,7 @@ def main():
             )
 
             # * END OF BLOCK -> PAUSE
-            if blockN == len(trial_blocks) - 1:
+            if blockN == n_blocks - 1:
                 show_msg(
                     win,
                     messages["last_block"],
