@@ -104,7 +104,7 @@ messages = {
     "block_end": (
         "Block {blockN} Completed\n\n"
         "Well done! You may take a short break now, but keep your head on the chinrest "
-        "and try not too move too much.\n"
+        "and try not to move too much.\n"
         "When you're ready to continue, place your fingers on the {keys} keys\n"
         "and press any of them to begin the next block."
     ),
@@ -434,7 +434,7 @@ def terminate_exp(
     sess_info (dict): The session information.
     session_dir (str): The directory path for saving session data.
     """
-
+    core.wait(0.1)
     record_event("experiment_end", eeg_device, eye_tracker)
 
     session_dir = Path(session_dir)
@@ -486,7 +486,7 @@ def abort_trial(
     Returns:
     str: "abort" if the user chooses to quit, "continue" if they choose to continue.
     """
-
+    core.wait(0.1)
     record_event("trial_aborted", eeg_device, eye_tracker)
 
     choice = show_msg(
@@ -692,6 +692,8 @@ def run_trial(
 
     if response:
         choice_key, response_time = response[0]
+        # * convert invalid keys to "invalid" (for the eye tracker, eeg_device already converts)
+        choice_key = valid_events.get(choice_key, "invalid")
     else:
         choice_key, response_time = "timeout", "timeout"
 
@@ -951,6 +953,7 @@ def init_experiment(
         abort_decision = abort_trial(win, eeg_device, eye_tracker, allowed_keys)
 
         if abort_decision == "abort":
+            core.wait(0.1)
             record_event("experiment_aborted", eeg_device, eye_tracker)
             terminate_exp(win, eeg_device, eye_tracker, {}, sess_info, session_dir)
 
@@ -1083,9 +1086,11 @@ def main():
     # * ################################################################################
 
     global_clock = core.Clock()
+    eeg_device.reset_port()  # * send 255 followed by 0 on stimulus channel
+    core.wait(0.1)
 
     # * Send signal to EEG amplifier & eye tracker to indicate start of experiment
-    record_event("exp_start", eeg_device, eye_tracker)
+    record_event("experiment_start", eeg_device, eye_tracker)
 
     # practice_data = {}
     # sess_data = {}

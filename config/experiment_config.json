@@ -122,7 +122,7 @@
       "m": 13,
       "l": 14,
       "timeout": 15,
-      "exp_start": 21,
+      "experiment_start": 21,
       "experiment_aborted": 22,
       "experiment_end": 23,
       "block_start": 31,
@@ -133,7 +133,8 @@
       "stim-flash_sequence": 51,
       "stim-flash_choices": 52,
       "stim-all_stim": 53,
-      "error": 100
+      "error": 100,
+      "eeg_reset":255
     },
     "monitor": {
       "name": "Main",
