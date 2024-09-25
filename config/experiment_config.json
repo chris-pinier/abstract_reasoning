@@ -122,6 +122,7 @@
       "m": 13,
       "l": 14,
       "timeout": 15,
+      "escape": 16,
       "experiment_start": 21,
       "experiment_aborted": 22,
       "experiment_end": 23,

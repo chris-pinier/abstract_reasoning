@@ -81,7 +81,6 @@ allowed_keys_str = ", ".join(allowed_keys).upper()
 
 refresh_rate = exp_config["lab"]["monitor"].get("refresh_rate")
 
-trial_count = 0
 
 # * ####################################################################################
 # * INSTRUCTIONS & MESSAGES
@@ -108,11 +107,12 @@ messages = {
         "When you're ready to continue, place your fingers on the {keys} keys\n"
         "and press any of them to begin the next block."
     ),
-    "end": (
+    "last_block": (
         "Experiment Completed\n\n"
         "Thank you for your participation!\n"
-        "Press Enter to finish and exit."
+        "Exporting data..."
     ),
+    "end": "Press Enter to finish and exit.",
     "abort_trial": (
         "Trial Aborted\n\n"
         "To resume the experiment: Press any of the {keys} keys\n"
@@ -692,10 +692,12 @@ def run_trial(
 
     if response:
         choice_key, response_time = response[0]
-        # * convert invalid keys to "invalid" (for the eye tracker, eeg_device already converts)
-        choice_key = valid_events.get(choice_key, "invalid")
     else:
         choice_key, response_time = "timeout", "timeout"
+
+    choice_key = (
+        choice_key if choice_key in allowed_keys + ["escape", "timeout"] else "invalid"
+    )
 
     record_event(choice_key, eeg_device, eye_tracker)
 
@@ -994,8 +996,6 @@ def run_trials(
     session_dir,
 ):
     for trial in trials:
-        # trial_count += 1
-        # trialN = trial_count
 
         # * Display the fixation cross in the middle of the screen
         fix_cross.draw()
@@ -1063,6 +1063,9 @@ def run_trials(
 
 
 def main():
+    # * ################################################################################
+    # * INITIALIZATION: Participant information + eye tracker calibration / validation
+    # * ################################################################################
     (
         win,
         sess_info,
@@ -1159,12 +1162,22 @@ def main():
                 sess_info,
                 session_dir,
             )
+
             # * END OF BLOCK -> PAUSE
-            show_msg(
-                win,
-                messages["block_end"].format(blockN=blockN + 1, keys=allowed_keys_str),
-                keys=allowed_keys,
-            )
+            if blockN == len(trial_blocks) - 1:
+                show_msg(
+                    win,
+                    messages["last_block"],
+                )
+                core.wait(4)
+            else:
+                show_msg(
+                    win,
+                    messages["block_end"].format(
+                        blockN=blockN + 1, keys=allowed_keys_str
+                    ),
+                    keys=allowed_keys,
+                )
 
             record_event("block_end", eeg_device, eye_tracker)
 
