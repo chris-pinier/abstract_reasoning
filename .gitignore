@@ -7,6 +7,10 @@ jobs/*
 eyetracking/
 archive/
 
+# ! ######## Temporary ########
+analysis_new.py
+
+
 # * ######## global config ########
 config/draft/*
 config/database.db

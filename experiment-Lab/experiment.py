@@ -61,15 +61,15 @@ block_size = 20
 
 timings = exp_config["global"]["timings"]
 
-# ! TEMP
+# # ! TEMP
 # timings = {
 #     'feedback_duration': 0,
 #     'intertrial_interval': [0, 0],
 #     'pres_duration': 0.01,
 #     'pre_pres_duration': None,
-#     'resp_window': 1
+#     'resp_window': 1.5
 #     }
-# ! TEMP
+# # ! TEMP
 
 timings = namedtuple("Timings", timings.keys())(*timings.values())
 iti = timings.intertrial_interval
@@ -97,14 +97,14 @@ messages = {
         "Practice Completed\n\n"
         "Great job! You're now ready for the main experiment.\n"
         "Please note: from now on, you will not receive feedback on your answers.\n"
-        "Remember to use the {keys} keys to select your answers.\n"
+        "Remember to use the \n{keys} keys \nto select your answers.\n"
         "Press any of these keys to start the main experiment."
     ),
     "block_end": (
         "Block {blockN} Completed\n\n"
         "Well done! You may take a short break now, but keep your head on the chinrest "
         "and try not to move too much.\n"
-        "When you're ready to continue, place your fingers on the {keys} keys\n"
+        "When you're ready to continue, place your fingers on the \n{keys} keys\n"
         "and press any of them to begin the next block."
     ),
     "last_block": (
@@ -115,15 +115,15 @@ messages = {
     "end": "Press Enter to finish and exit.",
     "abort_trial": (
         "Trial Aborted\n\n"
+        "To resume the experiment: \nPress any of the {keys} keys\n"
+        "To quit the experiment: Press 'Escape'"
+    ),
+    "abort_experiment": (
+        "Trial Aborted\n\n"
         "To resume the experiment: Press any of the {keys} keys\n"
         "To quit the experiment: Press 'Escape'"
     ),
-    "timeout": "Time's up! Please try to respond more quickly on the next trial.",
-    "invalid_key": (
-        "Oops! You pressed an invalid key.\n"
-        "Please use only the {keys} keys to respond.\n"
-        "Place your fingers on these keys and press any of them to continue."
-    ),
+    "timeout": "Time's up! Please try to respond more quickly.",
     "error": (
         "Technical Difficulty\n\n"
         "An unexpected error has occurred.\n"
@@ -367,6 +367,7 @@ def show_dialogue() -> dict:
 
         dlg.addText("Eye tracking")
         dlg.addField(key="edf_fname", label="File Name:")
+        dlg.addField("vision_correction", "Vision Correction:", choices=["none", "glasses", "contacts"])
         dlg.addField("eye", "Eye tracked:", choices=["left", "right"])
         dlg.addField(key="eye_screen_dist", label="Eye to Screen Distance (mm):")
 
@@ -739,9 +740,14 @@ def run_trial(
     else:
         correct = "invalid"
         choice = "invalid"
+        # show_msg(
+        #     win,
+        #     content=messages["invalid_key"].format(keys=allowed_keys_str),
+        #     keys=allowed_keys,
+        # )
         show_msg(
             win,
-            content=messages["invalid_key"].format(keys=allowed_keys_str),
+            Path("invalid_key_msg.png"),
             keys=allowed_keys,
         )
 
