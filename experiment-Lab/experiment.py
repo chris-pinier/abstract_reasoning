@@ -16,10 +16,6 @@ from setup import prepare_images
 from utils import prepare_sess, get_monitors_info, invert_dict, get_timestamp
 from devices import EEGcap, EyeTracker
 
-comments_desc = {
-    "! TEMP": "signals a temporary change that should be reverted later",
-    "! IMPLEMENT": "reminder to implement a feature",
-}
 
 # * ####################################################################################
 # * GLOBAL VARIABLES
@@ -86,6 +82,8 @@ refresh_rate = exp_config["lab"]["monitor"].get("refresh_rate")
 # * INSTRUCTIONS & MESSAGES
 # * ####################################################################################
 messages = {
+    "welcome": Path("instructions/welcome_msg.png"),
+    "et_calibration": "Press enter twice to start the eye tracker calibration",
     "practice_start": (
         "Practice Round\n\n"
         "Let's start with a few practice problems.\n"
@@ -100,13 +98,7 @@ messages = {
         "Remember to use the \n{keys} keys \nto select your answers.\n"
         "Press any of these keys to start the main experiment."
     ),
-    "block_end": (
-        "Block {blockN} Completed\n\n"
-        "Well done! You may take a short break now, but keep your head on the chinrest "
-        "and try not to move too much.\n"
-        "When you're ready to continue, place your fingers on the \n{keys} keys\n"
-        "and press any of them to begin the next block."
-    ),
+    "block_end": Path("instructions/block_end_msg.png"),
     "last_block": (
         "Experiment Completed\n\n"
         "Thank you for your participation!\n"
@@ -124,6 +116,7 @@ messages = {
         "To quit the experiment: Press 'Escape'"
     ),
     "timeout": "Time's up! Please try to respond more quickly.",
+    "invalid_key": Path("instructions/invalid_key_msg.png"),
     "error": (
         "Technical Difficulty\n\n"
         "An unexpected error has occurred.\n"
@@ -317,35 +310,6 @@ def show_msg(
         return pressed_key
 
 
-# def show_msg(
-#     win: visual.window.Window, text: str, kwargs: dict = None, keys: list = None
-# ):
-#     """
-#     Displays a message on the psychopy window and optionally waits for a key press.
-
-#     Parameters:
-#     win (visual.window.Window): The psychopy window object.
-#     text (str): The message to be displayed.
-#     kwargs (dict, optional): Additional keyword arguments to be passed to visual.TextStim.
-#     keys (list, optional): List of keys to wait for before continuing.
-
-#     Returns:
-#     The pressed key if keys are specified, otherwise None.
-#     """
-
-#     win_flip(win)
-#     kwargs = {} if kwargs is None else kwargs
-#     msg = visual.TextStim(win, text, **kwargs)
-#     # TODO : color=txt_color, wrapWidth=scn_width / 2)
-#     msg.draw()
-#     win_flip(win)
-
-#     if keys:
-#         pressed_key = event.waitKeys(keyList=keys)
-#         win_flip(win)
-#         return pressed_key
-
-
 def show_dialogue() -> dict:
     """
     Displays a dialogue box to collect subject and session information.
@@ -367,7 +331,11 @@ def show_dialogue() -> dict:
 
         dlg.addText("Eye tracking")
         dlg.addField(key="edf_fname", label="File Name:")
-        dlg.addField("vision_correction", "Vision Correction:", choices=["none", "glasses", "contacts"])
+        dlg.addField(
+            "vision_correction",
+            "Vision Correction:",
+            choices=["none", "glasses", "contacts"],
+        )
         dlg.addField("eye", "Eye tracked:", choices=["left", "right"])
         dlg.addField(key="eye_screen_dist", label="Eye to Screen Distance (mm):")
 
@@ -740,14 +708,10 @@ def run_trial(
     else:
         correct = "invalid"
         choice = "invalid"
-        # show_msg(
-        #     win,
-        #     content=messages["invalid_key"].format(keys=allowed_keys_str),
-        #     keys=allowed_keys,
-        # )
+
         show_msg(
             win,
-            Path("invalid_key_msg.png"),
+            content=messages["invalid_key"],
             keys=allowed_keys,
         )
 
@@ -938,7 +902,7 @@ def init_experiment(
 
     show_msg(
         win,
-        "Press enter twice to start the eye tracker calibration",
+        content=messages["et_calibration"],
         keys=["return"],
     )
     eye_tracker.calibrate()
@@ -955,7 +919,7 @@ def init_experiment(
     # * Welcome message
     pressed_key = show_msg(
         win,
-        Path("welcome_msg.png"),
+        messages["welcome"],
         keys=allowed_keys + ["escape"],
     )
 
@@ -1183,9 +1147,7 @@ def main():
             else:
                 show_msg(
                     win,
-                    messages["block_end"].format(
-                        blockN=blockN + 1, keys=allowed_keys_str
-                    ),
+                    messages["block_end"],
                     keys=allowed_keys,
                 )
 
