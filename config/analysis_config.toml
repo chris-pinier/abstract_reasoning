@@ -1,4 +1,9 @@
 [eeg]
+[eeg.chans]
+eeg = []
+eog = ["EOGL", "EOGR", "EOGT", "EOGB"]
+stim = 'Status'
+
 [eeg.ch_groups]
 frontal = [
     "Fp1",
@@ -121,6 +126,58 @@ centro-parietal = [
     "P4",
     "P6",
 ]
+
+[eeg.bad_channels]
+[eeg.bad_channels.subj_1]
+sess_1 = ["F3", "Fp1"]
+sess_2 = []
+sess_3 = []
+sess_4 = ["T8", "AF8", "F8", "P7"]
+sess_5 = []
+
+[eeg.bad_channels.subj_2]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+[eeg.bad_channels.subj_3]
+sess_1 = ["Iz", "AF3"]
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+[eeg.bad_channels.subj_4]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+[eeg.bad_channels.subj_5]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+[eeg.bad_channels.subj_6]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+
+[eeg.bad_channels.subj_7]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
 
 [stim]
 [stim.x_pos_stim]

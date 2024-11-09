@@ -4,4 +4,4 @@ This project is divided into three sub-projects, each with its own python enviro
 - experiment-Lab: in-lab version of the experiment ran with human participants
 - experiment-Online: online version of the experiment ran with human participants (slightly different task design as the lab experiment)
 
-![poster](poster.jpg)
+![poster](docs/poster.jpg)
