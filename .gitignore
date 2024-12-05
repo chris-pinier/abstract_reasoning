@@ -43,6 +43,7 @@ experiment-Lab/logs/*
 !experiment-Lab/logs/.gitkeep
 
 experiment-Lab/website/*
+
 # * ######## Online ########
 experiment-Online/draft/*
 !online/draft/.gitkeep
@@ -59,10 +60,16 @@ experiment-Online/results/*
 experiment-Online/logs/*
 !online/logs/.gitkeep
 
+# * ######## Setup-anlysis ########
+setup-analysis/results/*
+!analysis/results/.gitkeep
+
+analysis_old/*
 # * ###### Other ########
 # .vscode
 .secrets
 private.*
+settings.json
 
 # ! ########### APPLE OS SPECIFIC ########### ! # 
 .DS_Store
