@@ -3,15 +3,29 @@ import json
 from pprint import pprint
 from mne.preprocessing.eyetracking import read_eyelink_calibration
 from pathlib import Path
-from rich import print as rprint
-from rich.console import Console as richConsole
-from rich.table import Table as richTable
-from rich.theme import Theme as richTheme
 from tqdm.auto import tqdm
 import pandas as pd
 from scipy.interpolate import interp1d
 from mne.channels import DigMontage
 from typing import List, Dict
+import contextlib
+import io
+import pickle
+from typing import Union, Tuple
+# from rich import print as rprint
+# from rich.console import Console as richConsole
+# from rich.table import Table as richTable
+# from rich.theme import Theme as richTheme
+
+
+def save_pickle(data, filename):
+    with open(filename, "wb") as file:
+        pickle.dump(data, file)
+
+
+def load_pickle(filename):
+    with open(filename, "rb") as file:
+        return pickle.load(file)
 
 
 def normalize(data: np.ndarray, method: str = "min-max"):
@@ -108,11 +122,11 @@ def get_trial_info(
     # TODO: Finish this function
     trial_behav = raw_behav.iloc[epoch_N]
 
-    trial_seq = {i: trial_behav[f"figure{i+1}"] for i in range(8)}
+    trial_seq = {i: trial_behav[f"figure{i + 1}"] for i in range(8)}
     trial_seq[trial_behav["masked_idx"]] = "question-mark"
 
     trial_solution = trial_behav["solution"]
-    trial_choices = {i: trial_behav[f"choice{i+1}"] for i in range(4)}
+    trial_choices = {i: trial_behav[f"choice{i + 1}"] for i in range(4)}
     trial_response = trial_behav["choice"]
     rt = trial_behav["rt"]
 
@@ -228,7 +242,7 @@ def console_log(console, msg, level=None):
     # console.print("Something terrible happened!", style="danger")
 
 
-def check_notes(data_dir: Path):
+def check_notes(data_dir: Path, show: bool = True) -> dict:
     sess_info_files = sorted(data_dir.rglob("*sess_info.json"))
     notes = {}
     for f in sess_info_files:
@@ -239,31 +253,87 @@ def check_notes(data_dir: Path):
 
         if len(sess_info["Notes"]) > 0:
             notes[f"subj_{subj_N:02}-sess_{sess_N:02}"] = sess_info["Notes"]
-    pprint(notes)
+    if show:
+        pprint(notes)
+    return notes
 
 
-def check_et_calibrations(data_dir):
+def check_et_calibrations(
+    data_dir: Union[Path, str],
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Check the eye tracker calibration files
+
+    Args:
+        data_dir (pathlib.Path, str): Path to the data directory
+
+    Returns:
+        tuple: A tuple containing the calibration DataFrame and the calibration stats DataFrame
+    """
+
+    data_dir = Path(data_dir)
+
     et_files = sorted(data_dir.rglob("*.asc"))
-    et_cals = {}
-    for f in et_files:
+
+    cal_params = (
+        "onset",
+        "model",
+        "eye",
+        "avg_error",
+        "max_error",
+        "screen_size",
+        "screen_distance",
+        "screen_resolution",
+        "positions",
+        "offsets",
+        "gaze",
+    )
+
+    # * Exclude positions and gaze from the dataframe
+    df_cols = ["subj_N", "sess_N", "cal_N"] + [
+        p for p in cal_params if p not in ["positions", "gaze"]
+    ]
+
+    cals_df = pd.DataFrame(columns=df_cols)
+
+    # * Create a context manager to suppress stdout
+    for f in tqdm(et_files, desc="Checking ET calibrations"):
         subj_N = int(f.parents[1].name.split("_")[1])
         sess_N = int(f.parents[0].name.split("_")[1])
 
-        cals = read_eyelink_calibration(f)
+        with contextlib.redirect_stdout(io.StringIO()):
+            sess_cals = [dict(cal) for cal in read_eyelink_calibration(f)]
 
-        cals = [dict(cal) for cal in cals]
-        # pprint([i for i in dir(cal[0]) if not i.startswith("_")])
-        # pprint(list(cal[0].keys()))
+        if len(sess_cals) == 0:
+            vals = [subj_N, sess_N] + [np.nan] * (len(df_cols) - 2)
+            cal_df = pd.DataFrame([vals], columns=df_cols)
+            cals_df = pd.concat([cals_df, cal_df])
+        else:
+            for cal_N, cal in enumerate(sess_cals, start=1):
+                vals = [subj_N, sess_N, cal_N] + [
+                    cal[p] for p in cal_params if p in df_cols
+                ]
+                cal_df = pd.DataFrame([vals], columns=df_cols)
+                cals_df = pd.concat([cals_df, cal_df])
 
-        et_cals[f"subj_{subj_N:02}-sess_{sess_N:02}"] = cals
+    cals_df.reset_index(drop=True, inplace=True)
+    missing_cals = cals_df.copy().query("cal_N.isna()")
+    valid_cals = cals_df.copy().query("cal_N.notna()")
+    unvalid_cal_model = valid_cals.query('model != "HV9"')
 
-    for subj_sess, cals in et_cals.items():
-        subj, sess = subj_sess.split("-")
-        if len(cals) == 0:
-            msg = f"[warning] WARNING [/warning] No calibration found for {subj}-{sess}"
-            console_log(msg)
+    if missing_cals.shape[0] > 0:
+        missing_cals = missing_cals[["subj_N", "sess_N"]]
+        print(
+            f"\nWARNING: NO ET CALIBRATION FOUND IN THE FOLLOWING FILES:\n{missing_cals}\n"
+        )
 
-    # pprint(et_cals)
+    if unvalid_cal_model.shape[0] > 0:
+        print("WARNING: ET CALIBRATION MODEL IS NOT HV6")
+
+    et_cals_stats = valid_cals.describe()
+
+    print(f"\nET CALIBRATION STATS:\n{et_cals_stats}\n")
+
+    return (cals_df, et_cals_stats)
 
 
 def locate_trials(events, valid_events):
@@ -386,14 +456,45 @@ def resample_and_handle_nans(x_gaze, y_gaze, et_sfreq_original, eeg_sfreq):
 
 def check_ch_groups(
     montage: DigMontage,
-    # ch_names: List[str],
     ch_groups: Dict[str, list[str]],
-):
+) -> List[str] | None:
+    """#TODO: _summary_
+
+    Args:
+        montage (DigMontage): #TODO: _description_
+        ch_groups (Dict[str, list[str]]): #TODO: _description_
+    """
     montage_chans = set(montage.ch_names)
     groupped_chans = set([ch for ch_group in ch_groups.values() for ch in ch_group])
 
-    orphan_chans = montage_chans - groupped_chans
+    orphan_chans = list(montage_chans - groupped_chans)
 
     if orphan_chans:
-        print("WARNING: orphan channels found in ch_groups:")
-        print(orphan_chans)
+        print(
+            f"WARNING: orphan channels found in ch_groups:\n{'\t'.join(orphan_chans)}"
+        )
+        return orphan_chans
+    else:
+        return None
+
+
+def set_eeg_montage(
+    raw_eeg,
+    montage,
+    eog_chans,
+    non_eeg_chans,
+    verbose=True,
+):
+    raw_eeg.set_channel_types({ch: "eog" for ch in eog_chans})
+
+    # montage = mne.channels.make_standard_montage("biosemi64")
+
+    if other_chans := [
+        ch for ch in raw_eeg.ch_names if ch not in montage.ch_names + non_eeg_chans
+    ]:
+        if verbose:
+            print("WARNING: unknown channels detected. Dropping: ", other_chans)
+
+        raw_eeg.drop_channels(other_chans)
+
+    raw_eeg.set_montage(montage)

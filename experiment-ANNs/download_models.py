@@ -14,8 +14,9 @@ def download_model(model_name):
         # Download tokenizer
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         # Download model
-        model = AutoModel.from_pretrained(model_name)
+        model = AutoModel.from_pretrained(model_name, )
         print(f"Successfully downloaded {model_name}")
+
     except Exception as e:
         # Check if a file handler is already added, if not add one
         if not any(

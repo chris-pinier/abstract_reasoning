@@ -6,6 +6,8 @@ drafts/*
 jobs/*
 eyetracking/
 archive/
+*credentials*
+credentials.toml
 
 # ! ######## Temporary ########
 analysis_new.py
@@ -19,12 +21,13 @@ config/images_info.xslx
 
 # * ######## ANNs ########
 experiment-ANNs/config/*
-!ANNs/config/.gitkeep
+!experiment-ANNs/config/.gitkeep
 
 experiment-ANNs/results/*
 !experiment-ANNs/results/.gitkeep
 
 experiment-ANNs/draft/*
+experiment-ANNs/models/*
 
 # * ######## Local ########
 experiment-Lab/draft/*

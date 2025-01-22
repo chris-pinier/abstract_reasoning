@@ -16,130 +16,169 @@ from pathlib import Path
 from matplotlib.figure import Figure
 
 
-def plot_sequence(type, icon_images, stim_pos, stim_order, screen_resolution, save_dir):
-    # subj_N = 1
-    # sess_N = 1
-    # epoch_N = 0
+def pot_sequence_img(save_dir, stim_pos, icon_images, screen_resolution):
+    save_dir.mkdir(exist_ok=True)
 
+    fig, ax_et = plt.subplots(frameon=False)
+    ax_et.set_xlim(0, screen_resolution[0])
+    ax_et.set_ylim(screen_resolution[1], 0)
+    ax_et.set_xticks([])
+    ax_et.set_yticks([])
+    fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
+    # * Plot target icon
+    for icon_name, pos in stim_pos:
+        targ_left, targ_right, targ_bottom, targ_top = pos
+        ax_et.imshow(
+            icon_images[icon_name],
+            extent=[targ_left, targ_right, targ_bottom, targ_top],
+            origin="lower",
+        )
+
+        # # * Plot rectangle around target, with dimensions == img_size
+        # rectangle = mpatches.Rectangle(
+        #     (targ_left, targ_bottom),
+        #     img_size[0],
+        #     img_size[1],
+        #     linewidth=0.8,
+        #     linestyle="--",
+        #     edgecolor="black",
+        #     facecolor="none",
+        # )
+        # ax_et.add_patch(rectangle)
+    ax_et.set_facecolor("lightgrey")
+    # ax_et.axis("off")
+    ax_et.spines[["left", "right", "top", "bottom"]].set_visible(False)
+    # ax_et.splines = []
+    fig.set_facecolor((0.5, 0.5, 0.5))  # "lightgrey")
+    fig.tight_layout()
+    fig.savefig(save_dir / "sequence.png", dpi=300)
+
+
+def plot_sequence_video(
+    type, icon_images, stim_pos, stim_order, screen_resolution, save_dir
+):
     # save_dir = wd / "sequence_video"
     # if save_dir.exists():
     #     shutil.rmtree(save_dir)
     save_dir.mkdir(exist_ok=True)
 
-    if type == "image":
-        fig, ax_et = plt.subplots(frameon=False)
-        ax_et.set_xlim(0, screen_resolution[0])
-        ax_et.set_ylim(screen_resolution[1], 0)
-        ax_et.set_xticks([])
-        ax_et.set_yticks([])
-        fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    fps = 30
+    zfill_len = 3
+    frame_count = 0
 
-        # * Plot target icon
-        for icon_name, pos in stim_pos:
-            targ_left, targ_right, targ_bottom, targ_top = pos
-            ax_et.imshow(
-                icon_images[icon_name],
-                extent=[targ_left, targ_right, targ_bottom, targ_top],
-                origin="lower",
-            )
+    fig, ax_et = plt.subplots(frameon=False)
+    ax_et.set_xlim(0, screen_resolution[0])
+    ax_et.set_ylim(screen_resolution[1], 0)
+    ax_et.set_xticks([])
+    ax_et.set_yticks([])
+    fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
-            # # * Plot rectangle around target, with dimensions == img_size
-            # rectangle = mpatches.Rectangle(
-            #     (targ_left, targ_bottom),
-            #     img_size[0],
-            #     img_size[1],
-            #     linewidth=0.8,
-            #     linestyle="--",
-            #     edgecolor="black",
-            #     facecolor="none",
-            # )
-            # ax_et.add_patch(rectangle)
-        ax_et.set_facecolor("lightgrey")
-        # ax_et.axis("off")
-        ax_et.spines[["left", "right", "top", "bottom"]].set_visible(False)
-        # ax_et.splines = []
-        fig.set_facecolor((0.5, 0.5, 0.5))  # "lightgrey")
-        fig.tight_layout()
-        fig.savefig(save_dir / "sequence.png", dpi=300)
+    ax_et.set_facecolor("lightgrey")
+    ax_et.spines[["left", "right", "top", "bottom"]].set_visible(False)
+    fig.set_facecolor((0.5, 0.5, 0.5))  # "lightgrey")
+    fig.tight_layout()
 
-    elif type == "video":
-        # * ################################################################################
-        # * VIDEO
-        # * ################################################################################
-        fps = 30
-        zfill_len = 3
-        frame_count = 0
+    ax_et_fix_cross = ax_et.scatter(
+        screen_resolution[0] / 2,
+        screen_resolution[1] / 2,
+        s=80,
+        marker="+",
+        linewidths=1,
+        color="black",
+    )
+    ax_et_fix_cross.set_visible(False)
 
-        fig, ax_et = plt.subplots(frameon=False)
-        ax_et.set_xlim(0, screen_resolution[0])
-        ax_et.set_ylim(screen_resolution[1], 0)
-        ax_et.set_xticks([])
-        ax_et.set_yticks([])
-        fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    ax_et_plotted_icons = []
+    for icon_name, icon_pos in stim_pos:
+        left, right, bottom, top = icon_pos
 
-        ax_et.set_facecolor("lightgrey")
-        ax_et.spines[["left", "right", "top", "bottom"]].set_visible(False)
-        fig.set_facecolor((0.5, 0.5, 0.5))  # "lightgrey")
-        fig.tight_layout()
-
-        ax_et_fix_cross = ax_et.scatter(
-            screen_resolution[0] / 2,
-            screen_resolution[1] / 2,
-            s=80,
-            marker="+",
-            linewidths=1,
-            color="black",
+        this_icon = ax_et.imshow(
+            icon_images[icon_name],
+            extent=[left, right, bottom, top],
+            origin="lower",
         )
-        ax_et_fix_cross.set_visible(False)
 
-        ax_et_plotted_icons = []
-        for icon_name, icon_pos in stim_pos:
-            left, right, bottom, top = icon_pos
+        ax_et_plotted_icons.append(this_icon)
+        this_icon.set_visible(True)
 
-            this_icon = ax_et.imshow(
-                icon_images[icon_name],
-                extent=[left, right, bottom, top],
-                origin="lower",
-            )
+    plt.savefig(
+        save_dir / f"frame_{frame_count:0{zfill_len}}.png", dpi=300
+    )  # , bbox_inches="tight")
+    frame_count += 1
 
-            ax_et_plotted_icons.append(this_icon)
-            this_icon.set_visible(True)
+    [icon.set_visible(False) for icon in ax_et_plotted_icons]
 
+    for frame in range(0, fps):
+        ax_et_fix_cross.set_visible(True)
         plt.savefig(
             save_dir / f"frame_{frame_count:0{zfill_len}}.png", dpi=300
         )  # , bbox_inches="tight")
         frame_count += 1
 
-        [icon.set_visible(False) for icon in ax_et_plotted_icons]
+    ax_et_fix_cross.set_visible(False)
 
-        for frame in range(0, fps):
-            ax_et_fix_cross.set_visible(True)
+    for icon_idx in stim_order:
+        for frame in range(0, int(0.6 * fps)):
+            ax_et_plotted_icons[icon_idx].set_visible(True)
             plt.savefig(
                 save_dir / f"frame_{frame_count:0{zfill_len}}.png", dpi=300
             )  # , bbox_inches="tight")
             frame_count += 1
+        ax_et_plotted_icons[icon_idx].set_visible(False)
 
-        ax_et_fix_cross.set_visible(False)
+    [icon.set_visible(True) for icon in ax_et_plotted_icons]
 
-        for icon_idx in stim_order:
-            for frame in range(0, int(0.6 * fps)):
-                ax_et_plotted_icons[icon_idx].set_visible(True)
-                plt.savefig(
-                    save_dir / f"frame_{frame_count:0{zfill_len}}.png", dpi=300
-                )  # , bbox_inches="tight")
-                frame_count += 1
-            ax_et_plotted_icons[icon_idx].set_visible(False)
+    for frame in range(0, int(fps * 2)):
+        plt.savefig(
+            save_dir / f"frame_{frame_count:0{zfill_len}}.png", dpi=300
+        )  # , bbox_inches="tight")
+        frame_count += 1
 
-        [icon.set_visible(True) for icon in ax_et_plotted_icons]
+    [f.unlink() for f in save_dir.glob("*.png")]
+    create_video_from_frames(save_dir, "sequence_video.mp4", fps, zfill_len)
 
-        for frame in range(0, int(fps * 2)):
-            plt.savefig(
-                save_dir / f"frame_{frame_count:0{zfill_len}}.png", dpi=300
-            )  # , bbox_inches="tight")
-            frame_count += 1
 
-        [f.unlink() for f in save_dir.glob("*.png")]
-        create_video_from_frames(save_dir, "sequence_video.mp4", fps, zfill_len)
+def prepare_eeg_data_for_plot(
+    eeg_chan_groups,
+    eeg_montage,
+    non_eeg_chans,
+    sess_bad_chans: List[str],
+    group_names: List[str],
+    group_colors,
+):
+    selected_chans = [
+        i
+        for i, ch in enumerate(eeg_montage.ch_names)
+        if ch not in non_eeg_chans + sess_bad_chans
+    ]
+
+    selected_chans_names = [eeg_montage.ch_names[i] for i in selected_chans]
+
+    chans_pos_xy = np.array(
+        [
+            v
+            for k, v in eeg_montage.get_positions()["ch_pos"].items()
+            if k in selected_chans_names
+        ]
+    )[:, :2]
+
+    # * Select EEG channel groups to plot
+    selected_chan_groups = {
+        k: v for k, v in eeg_chan_groups.items() if k in group_names
+    }
+
+    group_colors = dict(zip(selected_chan_groups.keys(), group_colors))
+
+    # * Get channel indices for each channel group
+    ch_group_inds = {
+        group_name: [
+            i for i, ch in enumerate(selected_chans_names) if ch in group_chans
+        ]
+        for group_name, group_chans in selected_chan_groups.items()
+    }
+
+    return selected_chans_names, ch_group_inds, group_colors, chans_pos_xy
 
 
 def plot_eeg_and_gaze_fixations(
@@ -192,7 +231,7 @@ def plot_eeg_and_gaze_fixations(
         targ_left, targ_right, targ_bottom, targ_top = pos
         ax_et.imshow(
             icon_images[icon_name],
-            extent=[targ_left, targ_right, targ_bottom, targ_top],
+            extent=(targ_left, targ_right, targ_bottom, targ_top),
             origin="lower",
         )
 
@@ -287,48 +326,6 @@ def plot_eeg_and_gaze_fixations(
     # plt.show()
 
     return fig
-
-
-def prepare_eeg_data_for_plot(
-    eeg_chan_groups,
-    eeg_montage,
-    non_eeg_chans,
-    sess_bad_chans: List[str],
-    group_names: List[str],
-    group_colors,
-):
-    selected_chans = [
-        i
-        for i, ch in enumerate(eeg_montage.ch_names)
-        if ch not in non_eeg_chans + sess_bad_chans
-    ]
-
-    selected_chans_names = [eeg_montage.ch_names[i] for i in selected_chans]
-
-    chans_pos_xy = np.array(
-        [
-            v
-            for k, v in eeg_montage.get_positions()["ch_pos"].items()
-            if k in selected_chans_names
-        ]
-    )[:, :2]
-
-    # * Select EEG channel groups to plot
-    selected_chan_groups = {
-        k: v for k, v in eeg_chan_groups.items() if k in group_names
-    }
-
-    group_colors = dict(zip(selected_chan_groups.keys(), group_colors))
-
-    # * Get channel indices for each channel group
-    ch_group_inds = {
-        group_name: [
-            i for i, ch in enumerate(selected_chans_names) if ch in group_chans
-        ]
-        for group_name, group_chans in selected_chan_groups.items()
-    }
-
-    return selected_chans_names, ch_group_inds, group_colors, chans_pos_xy
 
 
 def plot_eeg_and_gaze_fixations_plotly(
@@ -596,6 +593,12 @@ def plot_eeg(
         current_row += 1
 
     if plot_eeg_group:
+        # TODO: make group_colors & ch_group_inds optional and uncomment below
+        # if group_colors is None or ch_group_inds is None:
+        #     raise ValueError(
+        #         "group_colors and ch_group_inds must be provided when plot_eeg_group=True."
+        #     )
+
         # * Plot EEG data, grouped by channel group
         ax_eeg_group = fig.add_subplot(gs[current_row, :])
         ax_eeg_group.grid(axis="x", ls="--")

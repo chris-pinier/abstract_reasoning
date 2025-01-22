@@ -1,4 +1,6 @@
 [eeg]
+montage = "biosemi64"
+
 [eeg.chans]
 eeg = []
 eog = ["EOGL", "EOGR", "EOGT", "EOGB"]
@@ -172,6 +174,98 @@ sess_5 = []
 
 
 [eeg.bad_channels.subj_7]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+
+[eeg.bad_channels.subj_8]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+[eeg.bad_channels.subj_9]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+[eeg.bad_channels.subj_10]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+[eeg.bad_channels.subj_11]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+[eeg.bad_channels.subj_12]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+
+[eeg.bad_channels.subj_13]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+
+[eeg.bad_channels.subj_14]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+
+[eeg.bad_channels.subj_15]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+
+[eeg.bad_channels.subj_16]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+
+[eeg.bad_channels.subj_17]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+
+[eeg.bad_channels.subj_18]
+sess_1 = []
+sess_2 = []
+sess_3 = []
+sess_4 = []
+sess_5 = []
+
+
+[eeg.bad_channels.subj_19]
 sess_1 = []
 sess_2 = []
 sess_3 = []
