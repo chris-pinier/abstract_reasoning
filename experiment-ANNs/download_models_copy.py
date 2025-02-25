@@ -8,9 +8,9 @@ import logging
 import tomllib
 from pathlib import Path
 
-WD = Path(__file__).resolve().parent
+WD = Path(__file__).parent
 
-with open(WD / "credentials.toml", "rb") as f:
+with open(WD.parent / "config/credentials.toml", "rb") as f:
     credentials = tomllib.load(f)
 
 hf_token = credentials.get("api_keys", {}).get("HF")
