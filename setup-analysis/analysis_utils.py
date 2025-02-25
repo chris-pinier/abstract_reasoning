@@ -11,11 +11,8 @@ from typing import List, Dict
 import contextlib
 import io
 import pickle
-from typing import Union, Tuple
-# from rich import print as rprint
-# from rich.console import Console as richConsole
-# from rich.table import Table as richTable
-# from rich.theme import Theme as richTheme
+from typing import Union, Tuple, Optional
+import tomllib
 
 
 def save_pickle(data, filename):
@@ -498,3 +495,203 @@ def set_eeg_montage(
         raw_eeg.drop_channels(other_chans)
 
     raw_eeg.set_montage(montage)
+
+
+def read_file(file_path: Path):
+    """
+    Reads a file based on its extension.  Supports JSON, pickle, and CSV.
+    Uses context managers for file handling.
+
+    Args:
+        file_path: A pathlib.Path object representing the file to read.
+
+    Returns:
+        The loaded data from the file, or None if the file type is not supported.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        TypeError: if the filepath is not a Path object
+        ValueError: If the file extension is not supported.
+        Exception:  For any other errors during file reading (e.g., JSONDecodeError, pickle.UnpicklingError).
+    """
+
+    if not isinstance(file_path, Path):
+        raise TypeError("file_path must be a pathlib.Path object.")
+
+    if not file_path.exists():
+        raise FileNotFoundError(f"The file '{file_path}' does not exist.")
+
+    # * Use a dictionary to map extensions to reader functions
+    file_readers = {
+        ".json": lambda f: json.load(f),
+        ".toml": lambda f: tomllib.load(f),
+        ".pickle": lambda f: pickle.load(f),
+        ".pkl": lambda f: pickle.load(f),
+        ".csv": lambda f: pd.read_csv(f),  # Pandas handles its own context internally
+    }
+
+    ext = file_path.suffix.lower()
+    reader_func = file_readers.get(ext)
+
+    if reader_func is None:
+        raise ValueError(
+            f"Unsupported file extension: {ext}.  Supported extensions: {list(file_readers.keys())}"
+        )
+
+    binary_exts = [".toml", ".pickle", ".pkl"]
+    try:
+        if ext in (".toml", ".json", ".pickle", ".pkl"):  # Context manager needed
+            with open(file_path, "rb" if ext in binary_exts else "r") as file:
+                return reader_func(file)  # Pass the open file object
+        elif ext == ".csv":
+            return reader_func(file_path)  # pd.read_csv can take a path directly.
+        else:
+            # This should never be reached
+            raise ValueError(f"Unsupported file extension despite earlier check {ext}.")
+    except (json.JSONDecodeError, pickle.UnpicklingError, pd.errors.ParserError) as e:
+        raise Exception(f"Error reading file '{file_path}': {e}") from e
+    except FileNotFoundError:
+        raise  # Re-raise for consistency
+    except Exception as e:
+        raise Exception(f"Error reading file '{file_path}': {e}") from e
+
+
+def apply_df_style(
+    df: pd.DataFrame,
+    style: int = 1,
+    vmin: Optional[Union[int, str, None]] = None,
+    vmax: Optional[Union[int, str, None]] = None,
+):  # -> pd.io.formats.style.Styler:
+    """Apply styling to a pandas DataFrame.
+
+    Args:
+        df: Input pandas DataFrame
+        style: Style identifier (default=1)
+            1: Yellow-Orange-Red gradient with 2 decimal formatting
+
+    Returns:
+        Styled pandas DataFrame
+
+    Raises:
+        ValueError: If style number is not supported
+    """
+
+    styles = {
+        1: lambda x: x.style.background_gradient(
+            cmap="YlOrRd", vmin=vmin, vmax=vmax
+        ).format("{:.2f}"),
+        2: lambda x: x.style.background_gradient(
+            cmap="RdYlBu", vmin=vmin, vmax=vmax
+        ).format("{:.2f}"),
+        3: lambda x: x.style.background_gradient(
+            cmap="coolwarm", vmin=vmin, vmax=vmax
+        ).format("{:.2f}"),
+        4: lambda x: x.style.background_gradient(
+            cmap="bwr", vmin=vmin, vmax=vmax
+        ).format("{:.2f}"),
+    }
+
+    if vmin == "auto":
+        vmin = df.min().min()
+    if vmax == "auto":
+        vmax = df.max().max()
+
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Input must be a pandas DataFrame")
+
+    if style not in styles:
+        raise ValueError(
+            f"Style {style} is not supported. Choose from: {list(styles.keys())}"
+        )
+
+    return styles[style](df)
+
+
+def reorder_item_ids(
+    original_order_df: pd.DataFrame, new_order_df: pd.DataFrame
+) -> np.ndarray:
+    """TODO:_summary_
+
+    Args:
+        original_df (pd.DataFrame): DataFrame containing the columns: item_id, pattern
+        new_df (pd.DataFrame): DataFrame containing the columns: item_id, pattern
+
+    Returns:
+        np.ndarray: reordered indices
+    """
+
+    original_order_df = original_order_df[["pattern", "item_id"]].reset_index(
+        names=["original_order"]
+    )
+
+    new_order_df = new_order_df[["pattern", "item_id"]].reset_index(names=["new_order"])
+
+    new_order_df = original_order_df.merge(
+        new_order_df, on=["pattern", "item_id"], how="left"
+    )
+
+    new_order_df = new_order_df[["original_order", "new_order"]].sort_values(
+        "new_order"
+    )
+
+    reordered_inds = new_order_df["original_order"].values
+
+    return reordered_inds
+
+
+def email_sender(email: str, password: str, on: bool = True):
+    """
+    To use with Gmail, you need to create an app password in your Google account settings:
+    https://myaccount.google.com/apppasswords
+
+    Args:
+        email (str): email address to send from
+        password (str): password for the email address
+        on (bool, optional): whether to enable the email sender. Defaults to True.
+
+    Returns:
+        EmailSender: object of EmailSender class
+    """
+    from email.message import EmailMessage
+    import ssl
+    import smtplib
+    from dataclasses import dataclass
+    from typing import List
+
+    @dataclass
+    class EmailSender:
+        """
+        To use with Gmail, you need to create an app password in your Google account settings:
+        https://myaccount.google.com/apppasswords
+
+        Args:
+            email (str): email address to send from
+            password (str): password for the email address
+            on (bool, optional): whether to enable the email sender. Defaults to True.
+        """
+
+        email: str
+        password: str
+        on: bool = True
+
+        def __post_init__(self):
+            if self.on:
+                self.context = ssl.create_default_context()
+                self.smtp = smtplib.SMTP_SSL(
+                    "smtp.gmail.com", 465, context=self.context
+                )
+                self.smtp.login(self.email, self.password)
+
+        def send(self, receiver: str, subject: str, body: str):
+            if not self.on:
+                return
+            else:
+                em = EmailMessage()
+                em["From"] = self.email
+                em["To"] = receiver
+                em["Subject"] = subject
+                em.set_content(body)
+
+                self.smtp.sendmail(self.email, receiver, em.as_string())
+
+    return EmailSender(email, password, on)

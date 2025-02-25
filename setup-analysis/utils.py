@@ -237,3 +237,4 @@ def custom_plot(
     plt.close()
 
     return fig
+

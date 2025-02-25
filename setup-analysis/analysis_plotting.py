@@ -14,9 +14,27 @@ from PIL import Image
 import subprocess
 from pathlib import Path
 from matplotlib.figure import Figure
+import pandas as pd
+import re
+from analysis_utils import get_trial_info
 
+def plot_sequence_img(
+    stim_pos: List,
+    icon_images: dict,
+    screen_resolution: tuple,
+    save_dir: Union[str, Path],
+    seq_id: Optional[str] = None,
+):
+    """_summary_
 
-def pot_sequence_img(save_dir, stim_pos, icon_images, screen_resolution):
+    Args:
+        stim_pos (List): list of tuples containing the icon name and its left, right, bottom, top positions
+        icon_images (dict): dictionary of icon images {icon_name: icon_image}
+        screen_resolution (tuple): screen resolution in pixels (width, height)
+        save_dir (Union[str, Path]): directory to save the image
+        seq_id (str, optional): Defaults to None. Sequence ID to use for the filename.
+    """
+    save_dir = Path(save_dir)
     save_dir.mkdir(exist_ok=True)
 
     fig, ax_et = plt.subplots(frameon=False)
@@ -46,13 +64,16 @@ def pot_sequence_img(save_dir, stim_pos, icon_images, screen_resolution):
         #     facecolor="none",
         # )
         # ax_et.add_patch(rectangle)
+
     ax_et.set_facecolor("lightgrey")
     # ax_et.axis("off")
     ax_et.spines[["left", "right", "top", "bottom"]].set_visible(False)
     # ax_et.splines = []
     fig.set_facecolor((0.5, 0.5, 0.5))  # "lightgrey")
     fig.tight_layout()
-    fig.savefig(save_dir / "sequence.png", dpi=300)
+
+    fname = f"sequence_{seq_id}.png" if seq_id is not None else "sequence.png"
+    fig.savefig(save_dir / fname, dpi=300)
 
 
 def plot_sequence_video(
@@ -513,7 +534,7 @@ def plot_eeg(
     """
 
     if chan_names is None:
-        chan_names = [f"Ch {i+1}" for i in range(eeg_data.shape[0])]
+        chan_names = [f"Ch {i + 1}" for i in range(eeg_data.shape[0])]
 
     # tick_step_time = 0.05
     # tick_step_sample = tick_step_time * eeg_sfreq
@@ -683,7 +704,7 @@ def plot_eeg_plotly_static(
     # * Add EEG time-series for each channel
     for i in range(eeg_data.shape[0]):
         fig.add_trace(
-            go.Scatter(y=eeg_data[i], mode="lines", name=f"Channel {i+1}"),
+            go.Scatter(y=eeg_data[i], mode="lines", name=f"Channel {i + 1}"),
             row=2,
             col=1,
         )
@@ -760,7 +781,7 @@ def plot_matrix(
     Plots a correlation matrix with optional labels and value annotations.
 
     Args:
-        - corr_matrix (np.ndarray): A square matrix representing correlations.
+        - matrix (np.ndarray): # TODO
         - labels (Optional[List[str]]): List of labels for the rows/columns of the matrix.
         - show_values (bool): Whether to display values on the plot. Default is False.
         - ax (Optional[plt.Axes]): An existing matplotlib Axes object. If None, a new one is created.
@@ -1038,7 +1059,6 @@ def custom_plot_montage_plotly(
     show: bool = True,
 ):
     import numpy as np
-    import pandas as pd
     import plotly.graph_objs as go
     # import plotly.offline as pyo
     # from mne.channels import DigMontage
@@ -1213,9 +1233,9 @@ def generate_trial_video(
     tracked_eye = et_epoch.ch_names[0].split("_")[1]
     # et_sfreq = et_epoch.info["sfreq"]
     # eeg_sfreq = eeg_epoch.info["sfreq"]
-    assert (
-        et_sfreq == et_epoch.info["sfreq"]
-    ), "Eye-tracking data has incorrect sampling rate"
+    assert et_sfreq == et_epoch.info["sfreq"], (
+        "Eye-tracking data has incorrect sampling rate"
+    )
     assert eeg_sfreq == eeg_epoch.info["sfreq"], "EEG data has incorrect sampling rate"
 
     sess_bad_chans = all_bad_chans.get(f"subj_{subj_N}", {}).get(f"sess_{sess_N}", [])
@@ -1631,7 +1651,7 @@ def generate_trial_video(
         plt.tight_layout()
 
         plt.savefig(
-            eeg_frames_dir / f"frame_{str(idx_step+1).zfill(zfill_len)}.png", dpi=dpi
+            eeg_frames_dir / f"frame_{str(idx_step + 1).zfill(zfill_len)}.png", dpi=dpi
         )
 
     reset_eeg_plot()

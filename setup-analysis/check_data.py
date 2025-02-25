@@ -1,10 +1,7 @@
 import os
 from pathlib import Path
 import pendulum.tz
-
-WD = Path(__file__).parent
-os.chdir(WD)
-from analysis_main import (
+from analysis_lab import (
     load_raw_data,
     preprocess_eeg_data,
     preprocess_et_data,
@@ -28,6 +25,10 @@ import contextlib
 import numpy as np
 from mne.preprocessing.eyetracking import read_eyelink_calibration
 import io
+
+WD = Path(__file__).parent
+# os.chdir(WD)
+assert WD == Path.cwd()
 
 # * ################################################################################
 # * GLOBAL VARIABLES
@@ -74,6 +75,9 @@ NON_EEG_CHANS = EOG_CHANS + [STIM_CHAN]
 # * Sampling Frequencies for EEG and Eye Tracking
 EEG_SFREQ: int = 2048
 ET_SFREQ: int = 2000
+
+# * Minimum fixation duration for eye tracking data
+MIN_FIXATION_DURATION = 0.05  # * seconds
 
 # * Getting Valid Event IDs
 VALID_EVENTS = EXP_CONFIG["lab"]["event_IDs"]
@@ -350,32 +354,142 @@ def analyze_ET_decision_period(
     )
 
 
-tests: dict = {
-    t: []
-    for t in [
-        "incorrect_trial_N",
-        "montage",
-        "eeg_sfreq",
-        "et_sfreq",
-        "et_cal",
-        "sequences",
-    ]
-}
+def check_gaze_fixations(subj_N, sess_N, min_fix_duration):
+    # * Load raw data
+    sess_dir = DATA_DIR / f"subj_{subj_N:02}/sess_{sess_N:02}"
+
+    # * File paths
+    et_fpath = [f for f in sess_dir.glob("*.asc")][0]
+    # sess_info_file = [f for f in sess_dir.glob("*sess_info.json")][0]
+    sequences_file = WD.parent / f"config/sequences/session_{sess_N}.csv"
+
+    # * Load data
+    # sess_info = json.load(open(sess_info_file))
+
+    sequences = pd.read_csv(
+        sequences_file, dtype={"choice_order": str, "seq_order": str}
+    )
+
+    # raw_behav = pd.read_csv(behav_fpath).merge(sequences, on="item_id")
+    raw_behav = load_and_clean_behav_data(DATA_DIR, subj_N, sess_N).merge(
+        sequences, on="item_id"
+    )
+
+    raw_behav.drop(columns=["pattern_x", "solution_x"], inplace=True)
+
+    raw_behav.rename(
+        columns={
+            "pattern_y": "pattern",
+            "solution_y": "solution",
+        },
+        inplace=True,
+    )
+
+    raw_et = mne.io.read_raw_eyelink(et_fpath, verbose="WARNING")
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        et_cals = read_eyelink_calibration(et_fpath)
+
+    (
+        manual_et_trials,
+        *_,
+        # et_events_dict,
+        # et_events_dict_inv,
+        # et_trial_bounds,
+        # et_trial_events_df,
+    ) = preprocess_et_data(raw_et, et_cals)
+
+    fixated_icons_per_trial = []
+
+    for trial_N in tqdm(raw_behav.index, desc="Analyzing every trial", leave=False):
+        # * Get the EEG and ET data for the current trial
+        et_trial = next(manual_et_trials)
+
+        (fixation_data, gaze_target_fixation_sequence_df, gaze_info) = (
+            analyze_ET_decision_period(
+                et_trial,
+                raw_behav,
+                trial_N,
+                pbar_off=True,
+                min_fix_duration=min_fix_duration,
+            )
+        )
+
+        fixated_icons_per_trial.append({k: len(v) for k, v in fixation_data.items()})
+
+    df = pd.DataFrame(fixated_icons_per_trial)
+    df.columns = [f"icon_{int(i)}" for i in df.columns]
+    df.insert(0, "subj_N", subj_N)
+    df.insert(1, "sess_N", sess_N)
+    df.insert(2, "trial_N", range(len(df)))
+    df["rt"] = raw_behav["rt"]
+    # df["correct"] = raw_behav["correct"].astype(int)
+    df.to_csv(fpath, index=False)
 
 
-def log_test(subj_N, sess_N, test_name, desc):
-    print(f"CHECK WARNING: subj_{subj_N}_sess_{sess_N} {desc}")
-    tests[test_name].append((f"subj_{subj_N:02}", f"sess_{sess_N:02}", desc))
+def analyze_gaze_data_check(folder: Path) -> pd.DataFrame:
+    files = list(folder.glob("*.csv"))
+    df = pd.concat([pd.read_csv(f) for f in files])
+    df.reset_index(drop=True, inplace=True)
+
+    filter_cols = [c for c in df.columns if "icon" in c or c == "subj_N"]
+    filtered_df = df[filter_cols]
+
+    fix_per_trial = filtered_df[filter_cols[1:]].sum(axis=1)
+    filtered_df.insert(filtered_df.shape[1], "total_fix", fix_per_trial)
+
+    df.insert(df.shape[1], "total_fix", fix_per_trial)
+
+    missing_data_pct = (filtered_df.iloc[:, 1:].sum(axis=1) == 0).sum() / len(
+        filtered_df
+    )
+    print(f"Missing data: {missing_data_pct:.2%}")
+
+    missing_data_pct_per_subj = []
+    # missing_data = pd.DataFrame(columns=["subj_N"] + [f"sess_{i}" for i in range(1,6)])
+
+    for subj_N in sorted(filtered_df["subj_N"].unique()):
+        subj_df = filtered_df.query(f"subj_N == {subj_N}")
+        total_subj_trials = len(subj_df)
+        no_fixation_trials = subj_df.query("total_fix == 0")
+        # print(subj_df.query("total_fix == 0").groupby("sess_N")['total_fix'].count())
+
+        number_of_no_fixation_trials = len(no_fixation_trials)
+        no_fixation_pct = len(no_fixation_trials) / total_subj_trials
+        missing_data_pct_per_subj.append(
+            [subj_N, number_of_no_fixation_trials, round(no_fixation_pct, 2)]
+        )
+        print(
+            f"Subj {subj_N:02}: {number_of_no_fixation_trials} trials with no fixations ({no_fixation_pct:.2%})"
+        )
+
+        # df_temp = subj_df.query("total_fix == 0").groupby("sess_N")["total_fix"].count()
+        # df_temp['subj_N'] = subj_N
+        # df_temp.to_dict()
+        # df_temp.reset_index()
+
+    df_missing_data = pd.DataFrame(
+        missing_data_pct_per_subj, columns=["subj_N", "no_fix_trials", "no_fix_pct"]
+    )
+
+    # df_missing_data.sort_values("no_fix_trials", ascending=False, inplace=True)
+    df_missing_data.sort_values("no_fix_pct", ascending=False, inplace=True)
+    notes
+    return df_missing_data
 
 
 if __name__ == "__main__":
     # * Create a directory for data check results
-    data_check_dir = WD / "results/data_check_dir"
+    data_check_dir = WD / f"results/data_check_dir/fixations-{MIN_FIXATION_DURATION}s"
     data_check_dir.mkdir(exist_ok=True, parents=True)
 
     # * Check the structure of the Data Directory
     data_dir_tree = DisplayTree(
-        DATA_DIR, stringRep=True, showHidden=True, ignoreList=[".DS_Store"], maxDepth=3
+        DATA_DIR,
+        stringRep=True,
+        showHidden=True,
+        ignoreList=[".DS_Store"],
+        maxDepth=2,
     )
 
     # data_dir_tree = DisplayTree(
@@ -414,87 +528,18 @@ if __name__ == "__main__":
     # * Check eye tracker data
     for subj_N, sess_N in tqdm(subj_sess):
         fpath = data_check_dir / f"{subj_N:02}{sess_N:02}-fixated_icons_per_trial.csv"
+
         if fpath.exists():
             continue
 
-        # * Load raw data
-        sess_dir = DATA_DIR / f"subj_{subj_N:02}/sess_{sess_N:02}"
+        check_gaze_fixations(subj_N, sess_N, MIN_FIXATION_DURATION)
 
-        # * File paths
-        et_fpath = [f for f in sess_dir.glob("*.asc")][0]
-        # sess_info_file = [f for f in sess_dir.glob("*sess_info.json")][0]
-        sequences_file = WD.parent / f"experiment-Lab/sequences/session_{sess_N}.csv"
+    # * Analyze the data check results
+    df_gaze_check = analyze_gaze_data_check(data_check_dir)
+    df_gaze_check.sort_values("no_fix_pct", ascending=False)
+    display(df_gaze_check)
 
-        # * Load data
-        # sess_info = json.load(open(sess_info_file))
 
-        sequences = pd.read_csv(
-            sequences_file, dtype={"choice_order": str, "seq_order": str}
-        )
-
-        # raw_behav = pd.read_csv(behav_fpath).merge(sequences, on="item_id")
-        raw_behav = load_and_clean_behav_data(DATA_DIR, subj_N, sess_N).merge(
-            sequences, on="item_id"
-        )
-
-        raw_behav.drop(columns=["pattern_x", "solution_x"], inplace=True)
-
-        raw_behav.rename(
-            columns={
-                "pattern_y": "pattern",
-                "solution_y": "solution",
-            },
-            inplace=True,
-        )
-
-        raw_et = mne.io.read_raw_eyelink(et_fpath, verbose="WARNING")
-
-        with contextlib.redirect_stdout(io.StringIO()):
-            et_cals = read_eyelink_calibration(et_fpath)
-
-        (
-            manual_et_trials,
-            *_,
-            # et_events_dict,
-            # et_events_dict_inv,
-            # et_trial_bounds,
-            # et_trial_events_df,
-        ) = preprocess_et_data(raw_et, et_cals)
-
-        fixated_icons_per_trial = []
-
-        for trial_N in tqdm(raw_behav.index, desc="Analyzing every trial", leave=False):
-            # * Get the EEG and ET data for the current trial
-            et_trial = next(manual_et_trials)
-
-            (fixation_data, gaze_target_fixation_sequence_df, gaze_info) = (
-                analyze_ET_decision_period(
-                    et_trial,
-                    raw_behav,
-                    trial_N,
-                    pbar_off=True,
-                    min_fix_duration=0.01,
-                )
-            )
-
-            fixated_icons_per_trial.append(
-                {k: len(v) for k, v in fixation_data.items()}
-            )
-
-        df = pd.DataFrame(fixated_icons_per_trial)
-        df.columns = [f"icon_{int(i)}" for i in df.columns]
-        df.insert(0, "subj_N", subj_N)
-        df.insert(1, "sess_N", sess_N)
-        df.insert(2, "trial_N", range(len(df)))
-        df["rt"] = raw_behav["rt"]
-        # df["correct"] = raw_behav["correct"].astype(int)
-        df.to_csv(fpath, index=False)
-
-        # #! TEMP
-        # folder = Path("results/data_check_dir")
-        # files = list(folder.glob("*.csv"))
-        # df = pd.concat([pd.read_csv(f) for f in files])
-
-        # df.sum()
-
-        # df.groupby(["subj_N", "sess_N"]).mean()
+    # df_sum = df.groupby(["subj_N", "sess_N"]).sum()
+    # df_sum.iloc[:, 1:-1].round(2).plot(kind="bar", legend=False)
+    # df.head(20)
