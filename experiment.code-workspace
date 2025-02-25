@@ -1,0 +1,41 @@
+{
+	"folders": [
+		{
+			"name": "abstract_reasoning",
+			"path": ".",
+		},
+		{
+			"name": "experiment-ANNs",
+			"path": "./experiment-ANNs",
+		},
+		{
+			"name": "experiment-Lab",
+			"path": "./experiment-Lab",
+		},
+		{
+			"name": "experiment-Online",
+			"path": "./experiment-Online",
+		},
+		{
+			"name": "setup-analysis",
+			"path": "./setup-analysis",
+		}
+	],
+	"settings": {
+		"python.terminal.activateEnvironment": true,
+		"interactiveWindow.executeWithShiftEnter": true,
+		"workbench.tree.renderIndentGuides": "always",
+		"workbench.tree.indent": 12,
+		"editor.formatOnSave": true,
+		"[python]": {
+			"editor.rulers": [
+				{
+					"column": 88,
+					// "color": "#e5cf42",
+				},
+			],  
+		},
+		"jupyter.interactiveWindow.textEditor.executeSelection": true,
+		"jupyter.interactiveWindow.creationMode": "perFile"
+	}
+}

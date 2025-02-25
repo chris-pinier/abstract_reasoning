@@ -8,6 +8,7 @@ eyetracking/
 archive/
 *credentials*
 credentials.toml
+TODO.txt
 
 # ! ######## Temporary ########
 analysis_new.py
@@ -17,6 +18,7 @@ analysis_new.py
 config/draft/*
 config/database.db
 config/images_info.xslx
+config/sequence_images/*
 
 
 # * ######## ANNs ########
@@ -65,7 +67,9 @@ experiment-Online/logs/*
 
 # * ######## Setup-anlysis ########
 setup-analysis/results/*
-!analysis/results/.gitkeep
+!setup-analysis/results/.gitkeep
+
+setup-analysis/draft/*
 
 analysis_old/*
 # * ###### Other ########
