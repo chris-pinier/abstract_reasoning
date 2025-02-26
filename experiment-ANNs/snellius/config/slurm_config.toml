@@ -1,0 +1,81 @@
+["Qwen/Qwen2.5-72B-Instruct"]
+job-name = "Qwen2.5_72B_instruct"
+ntasks = 1
+cpus-per-task = 6
+gpus = 4
+partition = "gpu_a100"
+mem-per-gpu = "40G"
+time = "02:00:00"
+
+["Qwen/Qwen2.5-7B-Instruct"]
+job-name = "Qwen2.5_7B_instruct"
+partition = "gpu_a100"
+nodes = 1
+ntasks-per-node = 1
+cpus-per-task = 6
+gpus-per-node = 1
+mem-per-gpu = "40G"
+time = "01:00:00"
+
+["Qwen--QwQ-32B-Preview"]
+
+["Qwen/Qwen2.5-32B-Instruct"]
+
+["google/gemma-2-2b-it"]
+job-name = "gemma-2-2b-it"
+partition = "gpu_a100"
+nodes = 1
+ntasks-per-node = 1
+cpus-per-task = 6
+gpus-per-node = 1
+mem-per-gpu = "20G"
+time = "01:00:00"
+
+["google/gemma-2-9b-it"]
+job-name = "gemma-2-9b-it"
+partition = "gpu_a100"
+nodes = 1
+ntasks-per-node = 1
+cpus-per-task = 6
+gpus-per-node = 1
+mem-per-gpu = "20G"
+time = "01:00:00"
+
+["meta-llama/Llama-3.2-3B-Instruct"]
+job-name = "Llama-3.2-3B-Instruct"
+partition = "gpu_mig"
+nodes = 1
+ntasks-per-node = 1
+cpus-per-task = 6
+gpus-per-node = 1
+mem-per-gpu = "20G"
+time = "01:00:00"
+
+["meta-llama/Meta-Llama-3-8B-Instruct"]
+job-name = "Llama-3-8B-Instruct"
+partition = "gpu"
+nodes = 1
+ntasks-per-node = 1
+cpus-per-task = 6
+gpus-per-node = 1
+mem-per-gpu = "30G"
+time = "01:00:00"
+
+["meta-llama/Llama-3.3-70B-Instruct"]
+job-name = "Llama-3.3-70B-Instruct"
+# nodes = 1
+ntasks = 1
+cpus-per-task = 6
+gpus = 4
+partition = "gpu_h100"
+mem-per-gpu = "50G"
+time = "02:00:00"
+
+["deepseek-ai/DeepSeek-R1-Distill-Llama-70B"]
+job-name = "DeepSeek-R1-Llama-70B"
+ntasks = 1
+cpus-per-task = 6
+gpus = 4
+partition = "gpu_a100"
+mem-per-gpu = "40G"
+time = "02:00:00"

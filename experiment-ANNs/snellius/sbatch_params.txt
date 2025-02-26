@@ -1,0 +1,51 @@
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=18
+#SBATCH --gres=gpu:2
+#SBATCH --mem=128G
+#SBATCH --time=01:00:00
+
+----------------------------------------
+#SBATCH --partition=gpu_mig
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=96G
+#SBATCH --time=00:60:00
+#SBATCH --gpus-per-node=2
+#SBATCH --output=out/SLURM-%j-run_models.out
+
+----------------------------------------
+Qwen 72B: crashes after an hour
+
+#!/bin/bash
+#SBATCH --partition=gpu_a100
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=18
+#SBATCH --gres=gpu:2
+#SBATCH --mem=128G
+#SBATCH --time=01:00:00
+#SBATCH --output=out/SLURM-%j-run_models.out
+
+----------------------------------------
+
+#!/bin/bash
+#SBATCH --partition=gpu_a100
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=18
+#SBATCH --gpus-per-node=3
+#SBATCH --mem=128G
+#SBATCH --time=00:60:00
+#SBATCH --output=out/SLURM-%j-run_models.out
+
+----------------------------------------
+#!/bin/bash
+#SBATCH --partition=gpu_h100        # Use the H100 partition
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4        # 4 tasks (one per GPU)
+#SBATCH --cpus-per-task=6          # 6 CPUs per task (adjust as needed)
+#SBATCH --gpus-per-node=4        # 4 H100 GPUs per node
+#SBATCH --mem-per-gpu=80G         # 80GB of memory per GPU
+#SBATCH --time=02:00:00            # 2 hours (adjust as needed)
+#SBATCH --output=out/SLURM-%j-run_models.out

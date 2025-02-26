@@ -1,0 +1,90 @@
+["google/gemma-2-2b-it"]
+layers = [
+        "model.layers.1.input_layernorm",
+        "model.layers.1.post_attention_layernorm",
+        "model.layers.1.pre_feedforward_layernorm",
+        "model.layers.1.post_feedforward_layernorm",
+        "model.layers.25.input_layernorm",
+        "model.layers.25.post_attention_layernorm",
+        "model.layers.25.pre_feedforward_layernorm",
+        "model.layers.25.post_feedforward_layernorm",
+]
+
+["google/gemma-2-9b-it"]
+layers = [
+        "model.layers.1.input_layernorm",
+        "model.layers.1.post_attention_layernorm",
+        "model.layers.1.pre_feedforward_layernorm",
+        "model.layers.1.post_feedforward_layernorm",
+        "model.layers.41.input_layernorm",
+        "model.layers.41.post_attention_layernorm",
+        "model.layers.41.pre_feedforward_layernorm",
+        "model.layers.41.post_feedforward_layernorm",
+]
+
+["Qwen/QwQ-32B-Preview"]
+layers = [
+        "model.layers.1.input_layernorm",
+        "model.layers.1.post_attention_layernorm",
+        "model.layers.63.input_layernorm",
+        "model.layers.63.post_attention_layernorm",
+        "lm_head",
+]
+
+["Qwen/Qwen2.5-72B-Instruct"]
+layers = [
+        # "model.layers.1.input_layernorm",
+        # "model.layers.1.post_attention_layernorm",
+        # "model.layers.40.input_layernorm",
+        # "model.layers.40.post_attention_layernorm",
+        "model.layers.79.input_layernorm",
+        "model.layers.79.post_attention_layernorm",
+        "lm_head",
+]
+
+['Qwen/Qwen2.5-7B-Instruct']
+layers = [
+        "model.layers.1.input_layernorm",
+        "model.layers.1.post_attention_layernorm",
+        "model.layers.27.input_layernorm",
+        "model.layers.27.post_attention_layernorm",
+        "lm_head",
+]
+["Qwen/Qwen2.5-32B-Instruct"]
+layers = []
+
+["meta-llama/Llama-3.2-3B-Instruct"]
+layers = [
+        "model.layers.1.input_layernorm",
+        "model.layers.1.post_attention_layernorm",
+        "model.layers.27.input_layernorm",
+        "model.layers.27.post_attention_layernorm",
+        "lm_head",
+]
+
+["meta-llama/Meta-Llama-3-8B-Instruct"]
+layers = [
+        "model.layers.1.input_layernorm",
+        "model.layers.1.post_attention_layernorm",
+        "model.layers.31.input_layernorm",
+        "model.layers.31.post_attention_layernorm",
+        "lm_head",
+]
+
+["meta-llama/Llama-3.3-70B-Instruct"]
+layers = [
+        "model.layers.79.input_layernorm",
+        "model.layers.79.post_attention_layernorm",
+        "lm_head",
+]
+
+["deepseek-ai/DeepSeek-R1-Distill-Llama-70B"]
+# Based on Llama-3.3-70B-Instruct
+layers = [
+        # "model.layers.79.input_layernorm",
+        "model.layers.79.post_attention_layernorm",
+        # "lm_head",
+]
+
+[other_model]
+layers = []
