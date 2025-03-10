@@ -43,7 +43,7 @@ time = "01:00:00"
 
 ["meta-llama/Llama-3.2-3B-Instruct"]
 job-name = "Llama-3.2-3B-Instruct"
-partition = "gpu_mig"
+partition = "gpu"
 nodes = 1
 ntasks-per-node = 1
 cpus-per-task = 6
@@ -78,4 +78,4 @@ cpus-per-task = 6
 gpus = 4
 partition = "gpu_a100"
 mem-per-gpu = "40G"
-time = "02:00:00"
+time = "03:00:00"

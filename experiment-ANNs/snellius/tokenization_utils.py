@@ -4,7 +4,7 @@ from transformers import AutoTokenizer
 import pandas as pd
 import re
 from tqdm.auto import tqdm
-from typing import Any, List
+from typing import Any, List, Tuple
 
 WD = Path(__file__).parent
 # os.chdir(WD)
@@ -37,8 +37,11 @@ def clean_tokens(text_tokens: List[str], tokenizer: AutoTokenizer):
 
 
 def locate_target_tokens(
-    prefix: str, suffix: str, tokens: List[str], error_val: Any = None
-):
+    prefix: str,
+    suffix: str,
+    tokens: List[str],
+    error_val: Any = None,
+) -> Tuple[int | None, int | None]:
     """_summary_
     Locate the indices of the target tokens in a list of tokens, using prefix and suffix strings as reference.
     Assuming that words are tokenized with their leading space (if any).
@@ -59,26 +62,41 @@ def locate_target_tokens(
     def tokens_list_to_string(tokens: List[str], sep: str = ""):
         return sep.join([t.strip() for t in tokens]).lower().strip().replace("\n", " ")
 
-    prefix = prefix.lower().strip().replace("\n", " ")
-    suffix = suffix.lower().strip().replace("\n", " ")
+    prefix = prefix.lower().strip().replace("\n", " ").replace(" ", "")
+    suffix = suffix.lower().strip().replace("\n", " ").replace(" ", "")
 
+    # * Find start and stop indices in the reconstructed text
     idx_start, idx_stop = None, None
+    reconstructed_txt = tokens_list_to_string(tokens, sep="")
 
-    # * Find the start index
-    for idx_token in range(len(tokens)):
-        reconstructed_txt = tokens_list_to_string(tokens[:idx_token])
-        if reconstructed_txt == prefix.replace(" ", ""):
-            idx_start = idx_token
+    # * Find the start index in the reconstructed text
+    found_start = reconstructed_txt.find(prefix)
+    if found_start != -1:
+        idx_start = found_start + len(prefix)
+
+    # # * Find the stop index in the reconstructed text
+    found_stop = reconstructed_txt.find(suffix)
+    if found_stop != -1:
+        idx_stop = found_stop
+
+    # * Find start and stop indices in the tokens list
+    tok_idx_start = None
+    tok_idx_stop = None
+
+    # * Find start index in the token list
+    for i in range(len(tokens)):
+        if tokens_list_to_string(tokens[:i]) == reconstructed_txt[:idx_start]:
+            tok_idx_start = i
             break
 
-    # * Find the stop index
-    for idx_token in range(1, len(tokens)):
-        reconstructed_txt = tokens_list_to_string(tokens[-idx_token:])
-        if reconstructed_txt == suffix.replace(" ", ""):
-            idx_stop = len(tokens) - idx_token
+    # * Find stop index in the token list
+    # * when i is 0, tokens[-0:] is equivalent to the entire list, so start at 1
+    for i in range(1, len(tokens) + 1):
+        if tokens_list_to_string(tokens[-i:]) == reconstructed_txt[idx_stop:]:
+            tok_idx_stop = len(tokens) - i
             break
 
-    indices = (idx_start, idx_stop)
+    indices = (tok_idx_start, tok_idx_stop)
 
     # * if both indices are found return them, otherwise return the error value or
     # * raise an exception
@@ -147,6 +165,7 @@ def get_sequence_tokens(
 
 
 if __name__ == "__main__":
+    pass
     # # * ################################################################################
     # # * Get token indices for the sequence elements/words in the prompts
     # # * ################################################################################
@@ -156,7 +175,6 @@ if __name__ == "__main__":
     #     d.name.replace("--", "/").replace("-responses", "")
     #     for d in data_dir.glob("*") if d.is_dir()
     # ]
-
 
     # sequence_filenames = [
     #     "sessions-1_to_5-masked_idx(7).csv",

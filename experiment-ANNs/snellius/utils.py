@@ -1,7 +1,7 @@
-
 import pickle
 from pathlib import Path
 from tqdm.auto import tqdm
+from typing import List, Tuple, Any
 
 def reformat_act_files(res_dir: Path, verbose=True, delete_original=True):
     act_files = sorted(res_dir.glob("layers_acts*.pkl"))
@@ -29,7 +29,9 @@ def reformat_act_files(res_dir: Path, verbose=True, delete_original=True):
     if delete_original:
         [f.unlink() for f in act_files]
 
-if __name__ == '__main__':
+
+
+if __name__ == "__main__":
     dir_list = [
         "/home/cpinier/test/results/20250207-095625/meta-llama--Llama-3.2-3B-Instruct",
         "/home/cpinier/test/results/20250207-101604/meta-llama--Meta-Llama-3-8B-Instruct",

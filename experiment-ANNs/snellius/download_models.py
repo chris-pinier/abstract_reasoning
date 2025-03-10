@@ -10,7 +10,7 @@ from pathlib import Path
 
 WD = Path(__file__).resolve().parent
 
-with open(WD / "config/credentials.toml", "rb") as f:
+with open(WD.parents[1] / "config/credentials.toml", "rb") as f:
     credentials = tomllib.load(f)
 
 hf_token = credentials.get("api_keys", {}).get("huggingface")
@@ -22,6 +22,7 @@ formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
 logs_dir = WD / "./download_logs"
 logs_dir.mkdir(exist_ok=True)
+
 
 def download_model(model_name, hf_token, cache_dir):
     try:
@@ -41,7 +42,7 @@ def download_model(model_name, hf_token, cache_dir):
         if not any(
             isinstance(handler, logging.FileHandler) for handler in logger.handlers
         ):
-            file_handler = logging.FileHandler(logs_dir/"model_download_errors.log")
+            file_handler = logging.FileHandler(logs_dir / "model_download_errors.log")
             file_handler.setFormatter(formatter)
 
             logger.addHandler(file_handler)
@@ -107,8 +108,8 @@ if __name__ == "__main__":
         # "meta-llama/Meta-Llama-3-8B-Instruct",
         # "Qwen/Qwen2.5-32B-Instruct"
         # "meta-llama/Llama-3.3-70B-Instruct",
-        # "Qwen/Qwen2.5-72B-Instruct",
-        "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+        "Qwen/Qwen2.5-72B-Instruct",
+        # "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
     ]
 
     main(model_names, hf_token, None)
