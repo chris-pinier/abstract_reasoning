@@ -6,10 +6,6 @@ import re
 from tqdm.auto import tqdm
 from typing import Any, List, Tuple
 
-WD = Path(__file__).parent
-# os.chdir(WD)
-assert WD == Path.cwd()
-
 
 def clean_tokens(text_tokens: List[str], tokenizer: AutoTokenizer):
     cleaned_tokens = text_tokens.copy()
@@ -166,6 +162,10 @@ def get_sequence_tokens(
 
 if __name__ == "__main__":
     pass
+    # WD = Path(__file__).parent
+    # # os.chdir(WD)
+    # assert WD == Path.cwd()
+
     # # * ################################################################################
     # # * Get token indices for the sequence elements/words in the prompts
     # # * ################################################################################

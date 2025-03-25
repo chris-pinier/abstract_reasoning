@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 import numpy.typing as npt
 from scipy.spatial.distance import squareform, pdist
 from scipy.stats import pearsonr
-from itertools import permutations
+from itertools import permutations, combinations
 import seaborn as sns
 from transformers import AutoTokenizer
 from analysis_utils import (
@@ -25,8 +25,10 @@ from analysis_utils import (
     apply_df_style,
     read_file,
     reorder_item_ids,
+    get_reference_rdms,
 )
 from analysis_lab_conf import Config as c
+from analysis_plotting import plot_rdm
 
 WD = Path(__file__).parent
 # os.chdir(WD)
@@ -74,6 +76,9 @@ PATTERNS: Final = sorted(
 #     return df_sequences
 ANSWER_REGEX = r"Answer:\s?\n?(\w+)"
 ITEM_ID_SORT = pd.read_csv("item_ids_sort_for_rdm.csv")
+
+
+model_names_mapping = {"meta-llama--Llama-3.2-3B-Instruct": "Llama 3.2 - 3B - IT"}
 
 
 # * -----------------------------
@@ -342,8 +347,6 @@ def load_model_layer_acts(res_dir: Path, model_id: str, layer: str) -> List[np.n
     layer_acts_file = res_dir / f"{model_id}/acts_by_layer-{layer}.pkl"
     return read_file(layer_acts_file)
 
-    return layer_acts
-
 
 def load_model_responses(res_dir: Path, model_id: str) -> pd.DataFrame:
     responses_file = res_dir / f"{model_id}/responses.csv"
@@ -415,26 +418,41 @@ def locate_target_tokens(
     def tokens_list_to_string(tokens: List[str], sep: str = ""):
         return sep.join([t.strip() for t in tokens]).lower().strip().replace("\n", " ")
 
-    prefix = prefix.lower().strip().replace("\n", " ")
-    suffix = suffix.lower().strip().replace("\n", " ")
+    prefix = prefix.lower().strip().replace("\n", " ").replace(" ", "")
+    suffix = suffix.lower().strip().replace("\n", " ").replace(" ", "")
 
+    # * Find start and stop indices in the reconstructed text
     idx_start, idx_stop = None, None
+    reconstructed_txt = tokens_list_to_string(tokens, sep="")
 
-    # * Find the start index
-    for idx_token in range(len(tokens)):
-        reconstructed_txt = tokens_list_to_string(tokens[:idx_token])
-        if reconstructed_txt == prefix.replace(" ", ""):
-            idx_start = idx_token
+    # * Find the start index in the reconstructed text
+    found_start = reconstructed_txt.find(prefix)
+    if found_start != -1:
+        idx_start = found_start + len(prefix)
+
+    # # * Find the stop index in the reconstructed text
+    found_stop = reconstructed_txt.find(suffix)
+    if found_stop != -1:
+        idx_stop = found_stop
+
+    # * Find start and stop indices in the tokens list
+    tok_idx_start = None
+    tok_idx_stop = None
+
+    # * Find start index in the token list
+    for i in range(len(tokens)):
+        if tokens_list_to_string(tokens[:i]) == reconstructed_txt[:idx_start]:
+            tok_idx_start = i
             break
 
-    # * Find the stop index
-    for idx_token in range(1, len(tokens)):
-        reconstructed_txt = tokens_list_to_string(tokens[-idx_token:])
-        if reconstructed_txt == suffix.replace(" ", ""):
-            idx_stop = len(tokens) - idx_token
+    # * Find stop index in the token list
+    # * when i is 0, tokens[-0:] is equivalent to the entire list, so start at 1
+    for i in range(1, len(tokens) + 1):
+        if tokens_list_to_string(tokens[-i:]) == reconstructed_txt[idx_stop:]:
+            tok_idx_stop = len(tokens) - i
             break
 
-    indices = (idx_start, idx_stop)
+    indices = (tok_idx_start, tok_idx_stop)
 
     # * if both indices are found return them, otherwise return the error value or
     # * raise an exception
@@ -532,7 +550,7 @@ def get_rdms_activations_on_seq_tokens(
     show_figs: bool = False,
 ):
     # # ! TEMP
-    # res_dir = DATA_DIR / "local_run/sessions-1_to_5-masked_idx(7)"
+    # res_dir = DATA_DIR / "local_run/sessions-1_to_5-masked_idx(7)-all_tokens_acts"
     # model_id = "meta-llama--Llama-3.3-70B-Instruct"
     # selected_layers = {
     #     "google--gemma-2-9b-it": "model.layers.41.post_attention_layernorm",
@@ -618,14 +636,16 @@ def get_rdms_activations_on_seq_tokens(
         # assert response_text == response_text_from_tokens
 
         # response_acts = layer_acts[trial][1:]
-        # response_acts = np.concat(response_acts, axis=1)
+        # response_acts = np.concatenate(response_acts, axis=1)
 
     assert sorted(set(responses["pattern"])) == PATTERNS, (
         "Unexpected or missing patterns"
     )
 
     # * Flatten layers activations across tokens into a new array of shape (n_items, n_tokens * n_units)
-    flattened_layers_acts = np.concat(sequences_acts).reshape(len(sequences_acts), -1)
+    flattened_layers_acts = np.concatenate(sequences_acts).reshape(
+        len(sequences_acts), -1
+    )
 
     # * Reorder the items
     reordered_inds = reorder_item_ids(
@@ -672,12 +692,12 @@ def get_rdms_activations_on_seq_tokens(
         avg_acts_per_pattern[pattern].append(sequence_acts.mean(axis=1))
 
     avg_acts_per_pattern = {
-        k: np.concat(v).mean(axis=0) for k, v in avg_acts_per_pattern.items()
+        k: np.concatenate(v).mean(axis=0) for k, v in avg_acts_per_pattern.items()
     }
 
     del layer_acts, sequences_acts
 
-    # * Reorder the patterns, just in cases
+    # * Reorder the patterns, just in case
     avg_acts_per_pattern = {k: avg_acts_per_pattern[k] for k in PATTERNS}
 
     # * Convert to Dataset for RDM calculation
@@ -715,19 +735,6 @@ def get_rdms_activations_on_seq_tokens(
     return avg_acts_per_pattern, rdm
 
 
-def get_rdms_activations_on_response_tokens(
-    res_dir: Path,
-    model_id: str,
-    layer: str,
-    targ_tokens_file: Path,
-    sequences_file: Path,
-    dissimilarity_metric: str,
-    answer_regex: str = r"Answer:\s?\n?(\w+)",
-    show_figs: bool = False,
-):
-    raise NotImplementedError
-
-
 def get_rdms_activations_on_accuracy(
     res_dir: Path,
     model_id: str,
@@ -757,7 +764,7 @@ def get_rdms_activations_on_accuracy(
     responses = clean_and_eval_model_responses(responses, answer_regex)
 
     order_by_pattern = responses.groupby("pattern").groups
-    order_by_pattern = np.concat([order_by_pattern[k] for k in PATTERNS])
+    order_by_pattern = np.concatenate([order_by_pattern[k] for k in PATTERNS])
     responses = responses.iloc[order_by_pattern]
 
     # * Convert to Dataset for RDM calculation
@@ -1003,10 +1010,10 @@ def performance_analysis(
     return res
 
 
-def performance_analysis_all(data_dir: Path, answer_regex: str):
+def perf_analysis_all_anns(data_dir: Path, answer_regex: str):
     # ! TEMP
-    data_dir = DATA_DIR / "local_run/sessions-1_to_5-masked_idx(7)"
-    answer_regex = r"Answer:\s?\n?(\w+)"
+    # data_dir = DATA_DIR / "local_run/sessions-1_to_5-masked_idx(7)"
+    # answer_regex = r"Answer:\s?\n?(\w+)"
     # ! TEMP
 
     model_ids = [d.name for d in data_dir.iterdir() if d.is_dir()]
@@ -1040,35 +1047,45 @@ def performance_analysis_all(data_dir: Path, answer_regex: str):
     return res
 
 
-def plot_perf_analysis(fig_params: Optional[Dict[str, Any]] = None):
+def plot_perf_analysis(
+    data_dir: Path,
+    show_figs: bool = False,
+    figs_params: Optional[Dict] = None,
+    save_fig_params: Optional[Dict] = None,
+    save_dir: Optional[Path] = None,
+):
     # # ! TEMP
-    data_dir = DATA_DIR / "local_run/sessions-1_to_5-masked_idx(7)"
+    # data_dir = DATA_DIR / "local_run/sessions-1_to_5-masked_idx(7)"
+    # show_figs = True
+    # figs_params = None
+    # save_fig_params = None
+    # save_dir = EXPORT_DIR / "analyzed/group_lvl"
+    # # ! TEMP
 
-    ann_data = performance_analysis(
-        data_dir,
-        "meta-llama--Llama-3.3-70B-Instruct",
-        r"Answer:\s?\n?(\w+)",
-        return_raw=True,
+    if figs_params is None:
+        fig_params = dict(figsize=(10, 6), dpi=300)
+    if save_fig_params is None:
+        save_fig_params = dict(dpi=300, bbox_inches="tight")
+
+    ax_params = dict(
+        grid={"ls": "--", "c": "k", "alpha": 0.5},
     )
 
-    model_id = "meta-llama--Llama-3.3-70B-Instruct"
-    layer = "model.layers.79.post_attention_layernorm"
-
-    # layer_acts = load_model_layer_acts(
+    # ann_data = performance_analysis(
     #     data_dir,
-    #     model_id,
-    #     layer,
+    #     "meta-llama--Llama-3.3-70B-Instruct",
+    #     r"Answer:\s?\n?(\w+)",
+    #     return_raw=True,
     # )
-    # ! TEMP
 
-    if fig_params is None:
-        fig_params = {
-            "dpi": 300,
-        }
+    # if fig_params is None:
+    #     fig_params = {
+    #         "dpi": 300,
+    #     }
 
-    ann_data["raw_cleaned"].groupby("pattern")["correct"].describe()
+    # ann_data["raw_cleaned"].groupby("pattern")["correct"].describe()
 
-    perf_res = performance_analysis_all(data_dir, ANSWER_REGEX)
+    perf_res = perf_analysis_all_anns(data_dir, ANSWER_REGEX)
     models_perf_df = perf_res["raw_cleaned"]
     models_perf_df.sort_values(["model_id", "pattern"], inplace=True)
 
@@ -1081,7 +1098,8 @@ def plot_perf_analysis(fig_params: Optional[Dict[str, Any]] = None):
 
     # models_perf_df = pd.concat(models_perf_list)
 
-    figs = []
+    figs = {}
+
     # * --------- FIGURE PARAMS ---------
     patterns_legend = "Patterns:\n  "
     patterns_legend += "\n  ".join(
@@ -1100,14 +1118,14 @@ def plot_perf_analysis(fig_params: Optional[Dict[str, Any]] = None):
         bbox=props,
     )
 
-    # *-----------------------
-    # * ------- FIGURE -------
     xticks = np.arange(0, len(PATTERNS), 1)
     xticks_labels = [f"{i + 1}" for i in xticks]
     yticks_pct = np.round(np.arange(0, 1.1, 0.1), 2)
     ytick_labels_pct = (yticks_pct * 100).astype(int)
 
-    fig, ax = plt.subplots(dpi=fig_params["dpi"])
+    # * --------- FIGURE: Accuracy by Pattern and Model ---------
+    title = "Accuracy by Pattern and Model"
+    fig, ax = plt.subplots(**fig_params)
     sns.lineplot(
         data=models_perf_df,
         x="pattern",
@@ -1118,70 +1136,64 @@ def plot_perf_analysis(fig_params: Optional[Dict[str, Any]] = None):
         ax=ax,
     )
     ax.legend(title="Models:", bbox_to_anchor=(1, 1))
-    ax.set_title("Accuracy by Pattern")
-    ax.grid(axis="y", ls="--", alpha=0.4)
+    ax.set_title(title)
+    ax.grid(axis="y", **ax_params.get("grid", {}))
     ax.set_xticks(xticks)
     ax.set_xticklabels(xticks_labels)
     ax.set_yticks(yticks_pct)
     ax.set_yticklabels(ytick_labels_pct)
+    ax.set_ylabel("Accuracy (%)")
     ax.text(**patterns_legend_params, transform=ax.transAxes)
-    # plt.tight_layout()
-    # plt.show()
-    figs.append(fig)
+    plt.tight_layout()
+    figs[title] = fig
+    plt.show() if show_figs else None
     # plt.close()
 
-    # *-----------------------
-    # * ------- FIGURE -------
-    fig, ax = plt.subplots(dpi=fig_params["dpi"])
+    # * --------- FIGURE: Accuracy by Pattern and Model Group ---------
+    title = "Accuracy by Pattern and Model Group"
+    fig, ax = plt.subplots(**fig_params)
     sns.lineplot(
-        data=models_perf_df, x="pattern", y="correct", errorbar=None, marker="o", ax=ax
+        data=models_perf_df, x="pattern", y="correct", errorbar="ci", marker="o", ax=ax
     )
     sns.lineplot(
         data=models_perf_df.query("model_id in @best_models"),
         x="pattern",
         y="correct",
-        errorbar=None,
+        errorbar="ci",
         marker="o",
         ax=ax,
     )
-    # ax.plot(
-    #     range(len(c.PATTERNS)),
-    #     [models_perf_df["correct"].mean()] * len(c.PATTERNS),
-    #     ls="--",
-    #     color="red",
-    #     alpha=0.7,
-    #     label="Mean",
-    # )
     lines = ax.get_lines()
     line_colors = [l.get_color() for l in lines]
     ax.legend(
         handles=lines,
         # labels=["All Models", "Best Models", "Mean"],
         labels=["All Models", "Best Models"],
-        title="Models:",
+        title="Models Groups:",
         bbox_to_anchor=(1, 1),
     )
-    ax.set_title("Overall Accuracy by Pattern")
-    ax.grid(axis="y", ls="--", alpha=0.4)
+    ax.set_title(title)
+    ax.grid(axis="y", **ax_params.get("grid", {}))
     ax.set_xticks(xticks)
     ax.set_xticklabels(xticks_labels)
     ax.set_yticks(yticks_pct)
     ax.set_yticklabels(ytick_labels_pct)
+    ax.set_ylabel("Accuracy (%)")
     ax.text(**patterns_legend_params, transform=ax.transAxes)
-    # plt.tight_layout()
+    plt.tight_layout()
+    figs[title] = fig
     # plt.show()
-    figs.append(fig)
     # plt.close()
 
-    # *-----------------------
-    # * ------- FIGURE -------
-    fig, ax = plt.subplots(dpi=fig_params["dpi"])
+    # * --------- FIGURE: Accuracy by Model ---------
+    title = "Accuracy by Model"
+    fig, ax = plt.subplots(**fig_params)
     sns.barplot(
         data=models_perf_df,
         x="model_id",
         y="correct",
-        hue="model_id",
-        errorbar=None,
+        # hue="model_id",
+        errorbar="ci",
         ax=ax,
     )
     model_names = [
@@ -1205,16 +1217,35 @@ def plot_perf_analysis(fig_params: Optional[Dict[str, Any]] = None):
     ax.set_ylabel("Accuracy (%)")
     ax.set_yticks(yticks_pct)
     ax.set_yticklabels(ytick_labels_pct)
-    ax.grid(axis="y", ls="--", alpha=0.4)
-    figs.append(fig)
+    ax.set_ylabel("Accuracy (%)")
+    ax.grid(axis="y", **ax_params.get("grid", {}))
     # plt.close()
+    figs[title] = fig
+
+    #  * --------- Export figures and tables ---------
+    if save_dir is not None:
+        prefix = "perf-"
+        suffix = ""
+
+        save_dir = Path(save_dir)
+        save_dir.mkdir(exist_ok=True, parents=True)
+
+        # * Export figures to PNG
+        for file_name, fig in figs.items():
+            file_name = f"{prefix}{file_name.replace(' ', '_').lower()}{suffix}"
+            fig.savefig(save_dir / f"{file_name}.png", **save_fig_params)
+
+        # # * Export tables to PNG
+        # prefix += "table-"
+        # for file_name, table in tables.items():
+        #     file_name = f"{prefix}{file_name.replace(' ', '_').lower()}{suffix}"
+        #     dfi.export(
+        #         table,
+        #         save_dir / f"{file_name}.png",
+        #         table_conversion="matplotlib",
+        #     )
 
     return figs
-
-    # *-----------------------
-    # * ------- FIGURE -------
-
-    pass
 
 
 def stat_analysis_on_ann_acts(ann_responses, ann_activations):
@@ -1237,9 +1268,216 @@ def stat_analysis_on_ann_acts(ann_responses, ann_activations):
     )
 
 
-# * -----------------------------
+def clean_layer_name(layer_name: str):
+    layer_name = (
+        layer_name.lower()
+        .replace("model", "")
+        .replace(".", " ")
+        .replace("layers", "layer")
+        .strip()
+    )
+    return layer_name
 
-if __name__ == "__main__":
+
+def get_rdms_on_all_layers(
+    res_dir: Path,
+    model_id: str,
+    dissimilarity_metric: str,
+    save_dir: Path,
+    show_figs: bool = False,
+):
+    # ! TEMP
+    # res_dir = DATA_DIR / "local_run/sessions-1_to_5-masked_idx(7)-sequence_tokens_acts"
+    # # model_id = "deepseek-ai--DeepSeek-R1-Distill-Llama-70B"
+    # model_id = "meta-llama--Llama-3.2-3B-Instruct"
+    # dissimilarity_metric = "correlation"
+    # save_dir = EXPORT_DIR / f"analyzed/RSA-seq_tokens-metric_{dissimilarity_metric}"
+    # show_figs = False
+    # ! TEMP
+
+    save_dir.mkdir(exist_ok=True, parents=True)
+
+    res_dir_model = res_dir / model_id
+
+    layers = [
+        re.search(r"acts_by_layer-(.+)", f.stem)[1]
+        for f in res_dir_model.glob("acts*.pkl")
+    ]
+
+    run_info = load_model_run_info(res_dir, model_id)
+    responses = load_model_responses(res_dir, model_id)
+    assert all(responses["item_id"] == run_info["item_ids"])
+
+    # tokens = load_model_tokens(res_dir, model_id)
+
+    responses["response_cleaned"] = [
+        responses["response"][i].replace(responses["prompt"][i], "")
+        for i in range(len(responses))
+    ]
+
+    # * Reorder the items
+    reordered_inds = reorder_item_ids(
+        original_order_df=responses[["pattern", "item_id"]],
+        new_order_df=ITEM_ID_SORT[["pattern", "item_id"]],
+    )
+    responses = responses.iloc[reordered_inds]
+
+    layers = sorted(layers, key=lambda x: int(x.split(".")[2]))
+
+    layers_acts = {}
+
+    for layer in layers:
+        layer_acts = load_model_layer_acts(res_dir, model_id, layer)
+        layer_acts = np.concatenate(layer_acts)[reordered_inds]
+
+        # * Flatten layers activations across tokens into a new array of shape (n_items, n_tokens * n_units)
+        flattened_layers_acts = layer_acts.reshape(len(layer_acts), -1)
+
+        # * ----- Sequence level RDM -----
+        # * Convert to Dataset for RDM calculation
+        layers_act_dataset = Dataset(
+            measurements=flattened_layers_acts,
+            descriptors={"model": model_id, "layer": layer},
+            obs_descriptors={
+                "patterns": responses["pattern"].tolist(),
+                "item_ids": responses["item_id"].tolist(),
+            },
+        )
+
+        layers_acts[layer] = layers_act_dataset
+
+    # * Generate RDM for every layer
+    rdms_sequence_lvl = []
+    for layer, layer_acts in tqdm(layers_acts.items()):
+        rdm = calc_rdm(layer_acts, method=dissimilarity_metric)
+        rdms_sequence_lvl.append(rdm)
+
+        # * Plot the RDM and save the figure
+        # fig, ax = plot_rdm(rdm, "patterns", True)
+        # ax.set_title(f"RDM Layer Activations per Pattern\n{model_id}-{layer}")
+
+        # * Save the RDM data and figure
+        # fpath = save_dir / f"rdm-ANN-({model_id})-({layer})-item_lvl.hdf5"
+        # rdm.save(fpath, file_type="hdf5", overwrite=True)
+        # fig.savefig(fpath.with_suffix(".png"), dpi=200, bbox_inches="tight")
+
+        # plt.show() if show_figs else None
+        # plt.close()
+
+    # * Get "Reference" RDM
+    ref_item_lvl_rdm = rsatoolbox.rdm.rdms.RDMs(
+        dissimilarities=get_reference_rdms()[0][None, :, :],
+        dissimilarity_measure="correlation",
+        # descriptors="Reference RDM",
+        # rdm_descriptors="item_lvl",
+        pattern_descriptors={"item_ids": run_info["item_ids"]},
+    )
+
+    # * Compare every layer RDM to Reference RDM
+    rdm_comparison = [
+        compare_rdm(rdm, ref_item_lvl_rdm, method="corr").item()
+        for rdm in rdms_sequence_lvl
+    ]
+
+    fig, ax = plt.subplots()
+    ax.plot(rdm_comparison, marker="o")
+    title = f"Layer-wise Similarity with Reference RDM\n{model_id}"
+    ax.set_title(title)
+    ax.set_xlabel("Layer")
+    ax.set_ylabel("Correlation")
+    ax.grid(True, ls="--")
+    fname = f"{title.lower().replace(' ', '_')}.png"
+    fpath = save_dir / fname
+    fig.savefig(fpath, dpi=200, bbox_inches="tight")
+
+    # * Select the layer RDM that is most similar to the reference RDM
+    ind_most_similar = np.argmax(rdm_comparison)
+    most_similar_layer = layers[ind_most_similar]
+    rdm_sequence_lvl = rdms_sequence_lvl[ind_most_similar]
+
+    # * Save the sequence-level dataset of this layer RDM
+    file_suffix = f"ANN-{model_id}-{most_similar_layer}-sequence_lvl.hdf5"
+
+    dataset = layers_acts[most_similar_layer]
+    fname = f"dataset-{file_suffix}"
+    fpath = save_dir / fname
+    dataset.save(fpath, file_type="hdf5", overwrite=True)
+
+    # * Save the RDM
+    fname = f"rdm-{file_suffix}"
+    fpath = save_dir / fname
+    rdm_sequence_lvl.save(fpath, file_type="hdf5", overwrite=True)
+
+    # * Plot the RDM and save the figure
+    model_name_clean = model_names_mapping.get(model_id, model_id)
+    layer_name_clean = clean_layer_name(most_similar_layer)
+
+    fig, ax = plot_rdm(rdm_sequence_lvl, "patterns", True)
+    ax.set_title(
+        f"RDM Layer Activations - Sequence Level\n{model_name_clean} - {layer_name_clean}"
+    )
+    fig.savefig(fpath.with_suffix(".png"), dpi=200, bbox_inches="tight")
+    plt.show() if show_figs else None
+    plt.close()
+
+    # * --------------------------------------------------------------------------------
+    # * ----- Pattern level RDM -----
+    # * Get the average activations per pattern
+    avg_acts_per_pattern: Dict = {pat: [] for pat in PATTERNS}
+
+    for trial, sequence_acts in enumerate(dataset.get_measurements()):
+        pattern = responses.iloc[trial]["pattern"]
+        # avg_acts_per_pattern[pattern].append(sequence_acts.mean(axis=0))
+        avg_acts_per_pattern[pattern].append(sequence_acts)
+
+    # avg_acts_per_pattern["AAABAAAB"]
+    # avg_acts_per_pattern["AAABAAAB"][0].shape
+    # [v.shape for v in avg_acts_per_pattern["AAABAAAB"]]
+    # np.array(avg_acts_per_pattern["AAABAAAB"]).shape
+    # np.array(avg_acts_per_pattern["AAABAAAB"]).mean(axis=0).shape
+    # np.array(avg_acts_per_pattern["AAABAAAB"]).mean(axis=0).mean(axis=0).shape
+
+    avg_acts_per_pattern = {
+        k: np.array(v).mean(axis=0) for k, v in avg_acts_per_pattern.items()
+    }
+
+    # * Reorder the patterns, just in case
+    avg_acts_per_pattern = {k: avg_acts_per_pattern[k] for k in PATTERNS}
+
+    # * Convert to Dataset for RDM calculation
+    dataset = Dataset(
+        measurements=np.array([v for v in avg_acts_per_pattern.values()]),
+        descriptors={"model": model_id, "layer": layer},
+        obs_descriptors={"patterns": list(avg_acts_per_pattern.keys())},
+    )
+
+    # * Save the pattern-level dataset of this layer RDM
+    file_suffix = f"ANN-{model_id}-{most_similar_layer}-pattern_lvl.hdf5"
+
+    fname = f"dataset-{file_suffix}"
+    fpath = save_dir / fname
+    dataset.save(fpath, file_type="hdf5", overwrite=True)
+
+    # * Compute the RDM and save the RDM
+    rdm_pattern_lvl = calc_rdm(dataset, method=dissimilarity_metric)
+    fname = f"rdm-{file_suffix}"
+    fpath = save_dir / fname
+    rdm_pattern_lvl.save(fpath, file_type="hdf5", overwrite=True)
+
+    # * Plot the RDM and save the figure
+    fig, ax = plot_rdm(rdm_pattern_lvl, "patterns")
+    ax.set_title(
+        f"RDM Layer Activations - Pattenr Level\n{model_name_clean} - {layer_name_clean}"
+    )
+    fig.savefig(fpath.with_suffix(".png"), dpi=200, bbox_inches="tight")
+    plt.show() if show_figs else None
+    plt.close()
+
+    return (rdm_sequence_lvl, rdm_pattern_lvl, rdms_sequence_lvl, rdm_comparison)
+
+
+# * -----------------------------
+def main_1():
     selected_layers = {
         "google--gemma-2-9b-it": "model.layers.41.post_attention_layernorm",
         "google--gemma-2-2b-it": "model.layers.25.post_attention_layernorm",
@@ -1284,6 +1522,10 @@ if __name__ == "__main__":
         # *
         dissimilarity_metric = "correlation"
         save_dir = EXPORT_DIR / f"analyzed/RSA-seq_tokens-metric_{dissimilarity_metric}"
+
+        # ! TEMP
+        save_dir = Path(str(save_dir) + "-TEST")
+        # ! TEMP
 
         avg_acts_per_pattern, rdm_acts = get_rdms_activations_on_seq_tokens(
             res_dir,
@@ -1337,3 +1579,53 @@ if __name__ == "__main__":
     # ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
     ax.set_xticklabels([i for i in range(len(ax.get_xticklabels()))])
     ax.grid(axis="y", ls="--")
+
+
+def main_2():
+    res_dir = DATA_DIR / "local_run/sessions-1_to_5-masked_idx(7)-sequence_tokens_acts"
+    model_ids = [d for d in res_dir.iterdir() if d.is_dir()]
+    model_ids = [d.name for d in model_ids if d.name != "other"]
+
+    dissimilarity_metric = "correlation"
+    save_dir = EXPORT_DIR / f"analyzed/RSA-seq_tokens-metric_{dissimilarity_metric}"
+
+    rdms_sequence_lvl = {}
+    rdms_pattern_lvl = {}
+
+    for model_id in tqdm(model_ids):
+        rdm_sequence_lvl, rdm_pattern_lvl, _, _ = get_rdms_on_all_layers(
+            res_dir,
+            model_id,
+            dissimilarity_metric,
+            save_dir,
+            # show_figs: bool = False,
+        )
+        rdms_sequence_lvl[model_id] = rdm_sequence_lvl
+        rdms_pattern_lvl[model_id] = rdm_pattern_lvl
+
+    # rsa_res = []
+    # similarity_metric = "corr"
+    # for model_1, model_2 in combinations(rdms_sequence_lvl.keys(), r=2):
+    #     res_sequence_lvl = compare_rdm(
+    #         rdms_sequence_lvl[model_1], rdms_sequence_lvl[model_2], similarity_metric
+    #     ).item()
+    #     res_pattern_lvl = compare_rdm(
+    #         rdms_pattern_lvl[model_1], rdms_pattern_lvl[model_2], similarity_metric
+    #     ).item()
+
+    #     rsa_res.append([model_1, model_2, "sequence", res_sequence_lvl])
+    #     rsa_res.append([model_1, model_2, "pattern", res_pattern_lvl])
+
+    # df_rsa = pd.DataFrame(rsa_res, columns=["model_1", "model_2", "level", "res"])
+
+    # res_dir = DATA_DIR / "local_run/sessions-1_to_5-masked_idx(7)-sequence_tokens_acts"
+    # # model_id = "deepseek-ai--DeepSeek-R1-Distill-Llama-70B"
+    # model_id = "meta-llama--Llama-3.2-3B-Instruct"
+    # dissimilarity_metric = "correlation"
+    # # save_dir = EXPORT_DIR / f"analyzed/RSA-seq_tokens-metric_{dissimilarity_metric}"
+    # save_dir = None
+    # show_figs = False
+
+
+if __name__ == "__main__":
+    pass

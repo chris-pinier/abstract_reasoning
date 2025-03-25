@@ -2,8 +2,7 @@ import base64
 import io
 import shutil
 from typing import List, Optional, Dict, Tuple, Union
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
+from matplotlib import pyplot as plt, patches as mpatches, ticker
 import mne
 import mplcursors
 import numpy as np
@@ -14,9 +13,12 @@ from PIL import Image
 import subprocess
 from pathlib import Path
 from matplotlib.figure import Figure
+from matplotlib.axes._axes import Axes
 import pandas as pd
 import re
 from analysis_utils import get_trial_info
+from rsatoolbox.rdm.rdms import RDMs
+
 
 def plot_sequence_img(
     stim_pos: List,
@@ -1668,6 +1670,71 @@ def generate_trial_video(
 
     fps = 3
     create_video_from_frames(eeg_frames_dir, "eeg_video.mp4", fps, zfill_len)
+
+
+def plot_rdm(
+    rdm: RDMs,
+    cluster_name: str,
+    separate_clusters: bool = False,
+    title=None,
+    fig_params=None,
+) -> Tuple[Figure, Axes]:
+    """_summary_
+
+    Args:
+        rdm (RDMs): RDM object from rsatoolbox
+        cluster_name (str): name of the RDM's obs_descriptor used to group the data.
+        separate_clusters (bool, optional): add a separation between every cluster. Defaults to False.
+
+    Returns:
+        Tuple[Figure, Axes]: _description_
+    """
+    if fig_params is None:
+        fig_params = {"dpi": 500}
+
+    clusters = rdm.pattern_descriptors[cluster_name]
+
+    clusters_last_inds = pd.Series(clusters, name=cluster_name).value_counts().cumsum()
+
+    tick_labels = clusters_last_inds.index
+    tick_marks = np.array([0] + clusters_last_inds.values.tolist())  # , dtype=float)
+
+    rdm_array = rdm.get_matrices()[0]
+
+    # * Add rows and columns of nans to separate clusters
+    if separate_clusters:
+        for i, tick_mark in enumerate(tick_marks):
+            if i == 0:
+                tick_marks[i:] += 1
+            else:
+                tick_marks[i:] += 1
+            rdm_array = np.insert(rdm_array, tick_mark, np.nan, axis=0)
+            rdm_array = np.insert(rdm_array, tick_mark, np.nan, axis=1)
+
+        tick_marks -= 1
+        tick_marks_labels = np.array(tick_marks[:-1]) + np.diff(tick_marks) / 2
+    else:
+        tick_marks = tick_marks.astype(float)
+        tick_marks -= 0.5
+        tick_marks_labels = np.array(tick_marks[:-1]) + np.diff(tick_marks) / 2
+
+    fig, ax = plt.subplots(**fig_params)
+    im = ax.imshow(rdm_array)
+    if title is not None:
+        ax.set_title(title)
+
+    ax.set_aspect("equal")
+    fig.colorbar(im, ax=ax)
+    ax.xaxis.set_minor_locator(ticker.FixedLocator(tick_marks))
+    ax.xaxis.set_major_locator(ticker.FixedLocator(tick_marks_labels))
+    ax.xaxis.set_major_formatter(ticker.FixedFormatter(tick_labels))
+    ax.tick_params(axis="x", labelrotation=90)
+
+    ax.yaxis.set_minor_locator(ticker.FixedLocator(tick_marks))
+    ax.yaxis.set_major_locator(ticker.FixedLocator(tick_marks_labels))
+    ax.yaxis.set_major_formatter(ticker.FixedFormatter(tick_labels))
+
+    return fig, ax
 
 
 if __name__ == "__main__":

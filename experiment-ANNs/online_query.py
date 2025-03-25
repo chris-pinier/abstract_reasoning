@@ -70,6 +70,7 @@ def main(
     assert task_type in ["text", "image"]
 
     open_router = OpenRouter(api_key=api_keys["openrouter"])
+
     if completion_parameters is None:
         completion_parameters = {}
     # open_router.rate_limit['interval']
@@ -218,13 +219,14 @@ def run_model_on_missing_items(
 if __name__ == "__main__":
     models = [
         # "anthropic/claude-3.5-sonnet",
-        "anthropic/claude-3.5-sonnet-20240620",
+        # "anthropic/claude-3.5-sonnet-20240620",
         # "deepseek/deepseek-chat",
         # "deepseek/deepseek-r1",
         # "deepseek/deepseek-r1-distill-llama-70b",
         # "deepseek/deepseek-r1-distill-qwen-1.5b",
         # "deepseek/deepseek-r1-distill-qwen-14b",
         # "deepseek/deepseek-r1-distill-qwen-32b",
+        "deepseek/deepseek-r1",
         # # "google/gemini-2.0-flash-exp:free",
         # # "google/gemini-2.0-flash-thinking-exp:free",
         # "google/gemini-flash-1.5 ",
@@ -240,25 +242,28 @@ if __name__ == "__main__":
         # "openai/o1-preview-2024-09-12",
         # "qwen/qwen-14b-chat",
         # "openai/o3-mini",
-        "meta-llama/llama-3.2-3b-instruct",
-        "meta-llama/llama-3.3-70b-instruct",
-        "minimax/minimax-01",
-        "mistralai/mistral-small-24b-instruct-2501",
-        "qwen/qwen-2.5-72b-instruct",
-        "qwen/qwen-2.5-7b-instruct",
+        # "meta-llama/llama-3.2-3b-instruct",
+        # "meta-llama/llama-3.3-70b-instruct",
+        # "minimax/minimax-01",
+        # "mistralai/mistral-small-24b-instruct-2501",
+        # "qwen/qwen-2.5-72b-instruct",
+        # "qwen/qwen-2.5-7b-instruct",
         # "qwen/qwq-32b-preview",
     ]
 
-    df_prompts = pd.read_csv(
-        WD / "sequence_prompts/sequence_prompts-masked_idx(mixed)-ascii_symbols.csv"
-    )
+    prompts_file = WD / "sequence_prompts/sequence_prompts-masked_idx(7).csv"
+    df_prompts = pd.read_csv(prompts_file)
 
     # df_prompts = df_prompts.sample(2)
 
     completion_parameters = dict(
-        temperature=1,
-        max_tokens=500,
+        temperature=0,
+        tool_choice=None,
+        seed=0,
+        # max_tokens=500,
     )
+
+    save_dir = EXPORT_DIR  # / prompts_file.stem
 
     models_resps, errors = main(
         df_prompts,

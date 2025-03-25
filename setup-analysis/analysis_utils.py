@@ -639,6 +639,28 @@ def reorder_item_ids(
     return reordered_inds
 
 
+def get_reference_rdms(n_trials=400, n_trials_per_patt_type=50, n_patt_type=8):
+    arr_item_lvl = np.ones((n_trials, n_trials))
+
+    inds = np.arange(0, n_trials + 1, n_trials_per_patt_type)
+    inds = list(zip(inds[:-1], inds[1:]))
+    inds = [slice(*i) for i in inds]
+
+    for ind_slice in inds:
+        arr_item_lvl[ind_slice, ind_slice] = 0
+
+    arr_pattern_lvl = np.ones((n_patt_type, n_patt_type))
+
+    inds = np.arange(0, n_patt_type + 1, 1)
+    inds = list(zip(inds[:-1], inds[1:]))
+    inds = [slice(*i) for i in inds]
+
+    for ind_slice in inds:
+        arr_pattern_lvl[ind_slice, ind_slice] = 0
+
+    return arr_item_lvl, arr_pattern_lvl
+
+
 def email_sender(email: str, password: str, on: bool = True):
     """
     To use with Gmail, you need to create an app password in your Google account settings:

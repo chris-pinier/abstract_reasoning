@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 import json
 import re
@@ -9,6 +8,7 @@ from matplotlib import pyplot as plt, patches as mpatches, ticker
 import mne
 import mne.baseline
 from mne_icalabel import label_components
+from mne.preprocessing.eyetracking import read_eyelink_calibration
 import numpy as np
 import pandas as pd
 import pendulum
@@ -18,14 +18,12 @@ import tensorpac
 import io
 from IPython.display import display
 from loguru import logger
-from mne.preprocessing.eyetracking import read_eyelink_calibration
 from rsatoolbox.data import Dataset, TemporalDataset
-from rsatoolbox.rdm import calc_rdm, RDMs, compare as compare_rdm, calc_rdm_movie
+from rsatoolbox.rdm import calc_rdm, RDMs, compare as compare_rdms, calc_rdm_movie
 import rsatoolbox
 from scipy.stats import pearsonr, spearmanr
 from tqdm.auto import tqdm
 import logging
-from itertools import combinations
 import seaborn as sns
 import dataframe_image as dfi
 from analysis_plotting import (
@@ -36,6 +34,7 @@ from analysis_plotting import (
     prepare_eeg_data_for_plot,
     show_ch_groups,
     plot_sequence_img,
+    plot_rdm,
 )
 from analysis_utils import (
     check_ch_groups,
@@ -51,10 +50,11 @@ from analysis_utils import (
     apply_df_style,
     read_file,
     reorder_item_ids,
+    get_reference_rdms,
     # email_sender as EmailSender,
 )
 from analysis_lab_conf import Config as c
-
+import copy
 # from tensorpac.methods import
 # from scipy import signal
 # import hmp
@@ -175,6 +175,26 @@ def load_and_clean_behav_data(data_dir: Path, subj_N: int, sess_N: int):
         == behav_data.query("choice==solution").shape[0] / behav_data.shape[0]
     ), "Error with cleaning of 'Correct' column"
 
+    # * ----------------------------------------
+    sequences_file = WD.parent / f"config/sequences/session_{sess_N}.csv"
+
+    sequences = pd.read_csv(
+        sequences_file, dtype={"choice_order": str, "seq_order": str}
+    )
+
+    behav_data = behav_data.merge(sequences, on="item_id")
+
+    # * Drop unnecessary columns
+    behav_data.drop(columns=["pattern_x", "solution_x"], inplace=True)
+
+    behav_data.rename(
+        columns={
+            "pattern_y": "pattern",
+            "solution_y": "solution",
+        },
+        inplace=True,
+    )
+
     return behav_data
 
 
@@ -195,6 +215,21 @@ def load_raw_data(
     bad_chans=None,
     logger=None,
 ):
+    """_summary_
+
+    Args:
+        subj_N (int): _description_
+        sess_N (int): _description_
+        data_dir (Path): _description_
+        eeg_montage (_type_): _description_
+        bad_chans (_type_, optional): _description_. Defaults to None.
+        logger (_type_, optional): _description_. Defaults to None.
+
+    Returns:
+        tuple[Any, DataFrame, DataFrame, RawEDF, RawEyelink, list]: sess_info,
+        sequences, raw_behav, raw_eeg, raw_et, et_cals
+
+    """
     sess_dir = data_dir / f"subj_{subj_N:02}/sess_{sess_N:02}"
 
     # * File paths
@@ -202,7 +237,6 @@ def load_raw_data(
     eeg_fpath = [f for f in sess_dir.glob("*.bdf")][0]
     # behav_fpath = [f for f in sess_dir.glob("*behav*.csv")][0]
     sess_info_file = [f for f in sess_dir.glob("*sess_info.json")][0]
-    sequences_file = WD.parent / f"config/sequences/session_{sess_N}.csv"
 
     # * Load data
     sess_info = json.load(open(sess_info_file))
@@ -220,15 +254,7 @@ def load_raw_data(
 
         # print(f"Notes for subj {subj_N}, sess {sess_N}: {sess_info['Notes']}")
 
-    sequences = pd.read_csv(
-        sequences_file, dtype={"choice_order": str, "seq_order": str}
-    )
-
-    # raw_behav = pd.read_csv(behav_fpath).merge(sequences, on="item_id")
-    raw_behav = load_and_clean_behav_data(c.DATA_DIR, subj_N, sess_N).merge(
-        sequences, on="item_id"
-    )
-
+    raw_behav = load_and_clean_behav_data(data_dir, subj_N, sess_N)
     raw_eeg = mne.io.read_raw_bdf(eeg_fpath, preload=False, verbose="WARNING")
 
     # set_eeg_montage(subj_N, sess_N, raw_eeg, eeg_montage, eog_chans, bad_chans)
@@ -248,20 +274,7 @@ def load_raw_data(
     with contextlib.redirect_stdout(io.StringIO()):
         et_cals = read_eyelink_calibration(et_fpath)
 
-    # * Drop unnecessary columns
-    # raw_behav.drop(columns=["Unnamed: 0"], inplace=True)
-
-    raw_behav.drop(columns=["pattern_x", "solution_x"], inplace=True)
-
-    raw_behav.rename(
-        columns={
-            "pattern_y": "pattern",
-            "solution_y": "solution",
-        },
-        inplace=True,
-    )
-
-    return sess_info, sequences, raw_behav, raw_eeg, raw_et, et_cals
+    return sess_info, raw_behav, raw_eeg, raw_et, et_cals
 
 
 # * ####################################################################################
@@ -824,8 +837,8 @@ def preprocess_et_data(raw_et, et_cals):
     eye_events_idx = 60
 
     for event_name, event_id in et_events_dict.items():
-        if event_name in VALID_EVENTS:
-            new_id = VALID_EVENTS[event_name]
+        if event_name in c.VALID_EVENTS:
+            new_id = c.VALID_EVENTS[event_name]
         else:
             eye_events_idx += 1
             new_id = eye_events_idx
@@ -845,7 +858,7 @@ def preprocess_et_data(raw_et, et_cals):
     et_events_dict_inv = {v: k for k, v in et_events_dict.items()}
 
     inds_responses = np.where(np.isin(et_events[:, 2], [10, 11, 12, 13, 14, 15, 16]))
-    choice_key_et = [VALID_EVENTS_INV[i] for i in et_events[inds_responses, 2][0]]
+    choice_key_et = [c.VALID_EVENTS_INV[i] for i in et_events[inds_responses, 2][0]]
 
     et_events_df = pd.DataFrame(et_events, columns=["sample_nb", "prev", "event_id"])
     et_events_df["event_id"] = et_events_df["event_id"].replace(et_events_dict_inv)
@@ -865,8 +878,8 @@ def preprocess_et_data(raw_et, et_cals):
     manual_et_epochs = []
     for start, end in tqdm(et_trial_bounds, desc="Creating ET epochs"):
         # * Get start and end times in seconds
-        start_time = (et_events[start, 0] / raw_et.info["sfreq"]) - PRE_TRIAL_TIME
-        end_time = et_events[end, 0] / raw_et.info["sfreq"] + POST_TRIAL_TIME
+        start_time = (et_events[start, 0] / raw_et.info["sfreq"]) - c.PRE_TRIAL_TIME
+        end_time = et_events[end, 0] / raw_et.info["sfreq"] + c.POST_TRIAL_TIME
 
         # * Crop the raw data to this time window
         epoch_data = raw_et.copy().crop(tmin=start_time, tmax=end_time)
@@ -934,6 +947,8 @@ def crop_et_trial(epoch: mne.Epochs):
 # * ####################################################################################
 # * EEG ANALYSIS
 # * ####################################################################################
+
+
 def reject_eeg_chans_procedure(raw_eeg):
     eeg_chan_inds = mne.pick_types(raw_eeg.info, eeg=True)
     eeg_chans = [raw_eeg.ch_names[i] for i in eeg_chan_inds]
@@ -978,152 +993,37 @@ def reject_eeg_chans_procedure(raw_eeg):
     return maybe_bad_chans
 
 
-def preprocess_eeg_data(
-    raw_eeg,
-    eeg_chan_groups,
+def split_eeg_data_into_trials(
+    raw_eeg: mne.io.Raw,
     raw_behav: pd.DataFrame,
-    preprocessed_dir: Path,
+    remove_practice: bool = True,
+    practice_ind: int = 3,
+    n_trials: int = 80,
+    incomplete: str = "error",
+    pb_on=False,
 ):
-    # ! TEMP
-    # eeg_chan_groups = EEG_CHAN_GROUPS
-    # ! TEMP
+    """_summary_ #TODO
 
-    fpath = Path(raw_eeg.filenames[0])
-    subj_N = int(fpath.parents[1].name.split("_")[1])
-    sess_dir = fpath.parents[0]
-    sess_N = int(sess_dir.name.split("_")[1])
+    Args:
+        raw_eeg (mne.io.Raw): _description_
+        raw_behav (pd.DataFrame): _description_
+        remove_practice (bool, optional): _description_. Defaults to True.
+        practice_ind (int, optional): _description_. Defaults to 3.
+        n_trials (int, optional): _description_. Defaults to 80.
+        incomplete (str, optional): _description_. Defaults to "error".
 
-    preprocessed_dir.mkdir(exist_ok=True)
+    Raises:
+        ValueError: _description_
+        ValueError: _description_
 
-    preprocessed_raw_fpath = (
-        preprocessed_dir / f"subj_{subj_N:02}{sess_N:02}_preprocessed-raw.fif"
-    )
-
-    if not preprocessed_raw_fpath.exists():
-        print("Preprocessing raw data...")
-
-        # * Setting EOG channels
-        raw_eeg.load_data(verbose="WARNING")
-
-        # * Detecting events
-        eeg_events = mne.find_events(
-            raw_eeg,
-            min_duration=0,
-            initial_event=False,
-            shortest_event=1,
-            uint_cast=True,
-            verbose="WARNING",
+    Returns:
+        _type_: _description_
+    """
+    if incomplete not in ["allow", "error", "skip"]:
+        raise ValueError(
+            "incomplete must be either of the following: 'allow', 'error', 'skip'"
         )
 
-        # # ! TEMP
-        # df = pd.DataFrame(eeg_events, columns=["sample_nb", "prev", "event_id"])
-        # df["event_id"] = df["event_id"].replace(VALID_EVENTS_INV)
-        # ! TEMP
-
-        # * Get annotations from events and add them to the raw data
-        annotations = mne.annotations_from_events(
-            eeg_events,
-            raw_eeg.info["sfreq"],
-            event_desc=c.VALID_EVENTS_INV,
-            verbose="WARNING",
-        )
-
-        raw_eeg.set_annotations(annotations, verbose="WARNING")
-
-        bad_chans = raw_eeg.info["bads"]
-
-        manually_set_bad_chans = c.ALL_BAD_CHANS.get(f"subj_{subj_N}", {}).get(
-            f"sess_{sess_N}"
-        )
-
-        if not bad_chans == manually_set_bad_chans:
-            print(
-                "WARNING: raw EEG bad channels do not match expected bad channels, combining them"
-            )
-
-        bad_chans = list(set(bad_chans) | set(manually_set_bad_chans))
-
-        raw_eeg.info["bads"] = bad_chans
-
-        # raw_eeg.drop_channels(bad_chans)
-
-        # * Check if channel groups include all channels present in the montage
-        # * i.e., that there are no "orphan" channels
-        check_ch_groups(raw_eeg.get_montage(), eeg_chan_groups)
-
-        # * Average Reference
-        raw_eeg = raw_eeg.set_eeg_reference(ref_channels="average", verbose="WARNING")
-        raw_eeg.filter(l_freq=1, h_freq=100, verbose="WARNING")
-
-        # * ############################################################################
-        # * EOG artifact rejection using ICA
-        # * ############################################################################
-
-        ica_fpath = preprocessed_dir / f"subj_{subj_N:02}{sess_N:02}_fitted-ica.fif"
-
-        if ica_fpath.exists():
-            # * if ICA file exists, load it
-            ica = mne.preprocessing.read_ica(ica_fpath)
-
-        else:
-            # * Create a copy of the raw data to hihg-pass filter at 1Hz before ICA
-            # * as recommended by MNE: https://mne.tools/stable/generated/mne.preprocessing.ICA.html
-            # raw_eeg_copy_for_ica = raw_eeg.copy()
-            # raw_eeg.filter(l_freq=1, h_freq=100, verbose="WARNING")
-
-            ica = mne.preprocessing.ICA(
-                n_components=None,
-                noise_cov=None,
-                random_state=c.RAND_SEED,
-                # method="fastica",
-                method="infomax",
-                fit_params=dict(extended=True),
-                max_iter="auto",
-                verbose="WARNING",
-            )
-
-            ica.fit(raw_eeg, verbose="WARNING")
-
-            ica.save(ica_fpath, verbose="WARNING")
-
-        # eog_inds, eog_scores = ica.find_bads_eog(raw_eeg)
-        # ica.exclude = eog_inds
-
-        # # * Label components using IClabel
-        ic_labels = label_components(raw_eeg, ica, method="iclabel")
-
-        # df_labels = pd.DataFrame(
-        #     list(zip(list(ic_labels["y_pred_proba"]), ic_labels["labels"])), columns=['prob', 'label']
-        # ).sort_values(by='prob', ascending=False)
-
-        # # * Get indices of components labeled as 'brain'
-        brain_ic_indices = [
-            idx for idx, label in enumerate(ic_labels["labels"]) if label == "brain"
-        ]
-
-        # # * Keep only brain components, effectively rejecting artifactual ones
-        ica.exclude = [
-            idx for idx in range(ica.n_components_) if idx not in brain_ic_indices
-        ]
-
-        # * Apply ICA to raw data
-        raw_eeg = ica.apply(raw_eeg, verbose="WARNING")
-
-        # TODO: automatically remove bad channels (e.g., amplitude cutoff)
-
-        # * Bandpass Filter: 0.1 - 100 Hz
-        # raw_eeg.filter(l_freq=0.1, h_freq=100, verbose="WARNING")
-        raw_eeg.notch_filter(freqs=50, verbose="WARNING")
-        raw_eeg.notch_filter(freqs=100, verbose="WARNING")
-
-        # * Save preprocessed raw data
-        raw_eeg.save(preprocessed_raw_fpath, overwrite=True, verbose="WARNING")
-
-        del raw_eeg
-
-    raw_eeg = mne.io.read_raw_fif(
-        preprocessed_raw_fpath, preload=False, verbose="WARNING"
-    )
     eeg_events, _ = mne.events_from_annotations(
         raw_eeg, c.VALID_EVENTS, verbose="WARNING"
     )
@@ -1136,16 +1036,25 @@ def preprocess_eeg_data(
 
     eeg_trial_bounds, eeg_events_df = locate_trials(eeg_events, c.VALID_EVENTS)
 
-    # * Remove practice trials
-    if sess_N == 1:
-        choice_key_eeg = choice_key_eeg[3:]
-        eeg_trial_bounds = eeg_trial_bounds[3:]
+    if remove_practice is True:
+        if len(choice_key_eeg) > n_trials and len(eeg_trial_bounds) > n_trials:
+            choice_key_eeg = choice_key_eeg[practice_ind:]
+            eeg_trial_bounds = eeg_trial_bounds[practice_ind:]
 
-    if not len(choice_key_eeg) == len(eeg_trial_bounds) == 80:
-        raise ValueError(
+    if not len(choice_key_eeg) == len(eeg_trial_bounds) == n_trials:
+        warning_msg = (
             "Error with EEG events: incorrect number of trials.\n"
             f"{len(choice_key_eeg) = }\n{len(eeg_trial_bounds) = }"
         )
+        if incomplete == "error":
+            raise ValueError(warning_msg)
+        elif incomplete == "skip":
+            print(warning_msg)
+            # * Return a list of None matching the size of the expect output
+            return [None] * 4
+        elif incomplete == "allow":
+            print(warning_msg)
+            pass
 
     raw_behav["choice_key_eeg"] = choice_key_eeg
     raw_behav["same"] = raw_behav["choice_key"] == raw_behav["choice_key_eeg"]
@@ -1153,7 +1062,10 @@ def preprocess_eeg_data(
     manual_eeg_trials = []
 
     # * Loop through each trial
-    for start, end in tqdm(eeg_trial_bounds, "Creating EEG epochs"):
+    if pb_on is True:
+        eeg_trial_bounds = tqdm(eeg_trial_bounds, "Creating EEG epochs")
+
+    for start, end in eeg_trial_bounds:
         # * Get start and end times in seconds
         start_time = (eeg_events[start, 0] / raw_eeg.info["sfreq"]) - c.PRE_TRIAL_TIME
         end_time = eeg_events[end, 0] / raw_eeg.info["sfreq"] + c.POST_TRIAL_TIME
@@ -1171,6 +1083,179 @@ def preprocess_eeg_data(
     manual_eeg_trials = (trial for trial in manual_eeg_trials)
 
     return manual_eeg_trials, eeg_trial_bounds, eeg_events, eeg_events_df
+
+
+def preprocess_eeg_data(
+    raw_eeg: mne.io.Raw,
+    eeg_chan_groups: Dict[str, str],
+    raw_behav: pd.DataFrame,
+    preprocessed_dir: Path,
+    force: Optional[bool] = False,
+    reuse_ica: Optional[bool] = True,
+    # # TODO: bad_chs_method="interpolate",
+):
+    # ! TEMP
+    # eeg_chan_groups = c.EEG_CHAN_GROUPS
+    # subj_N = 1
+    # sess_N = 4
+    # bad_chans = c.ALL_BAD_CHANS.get(f"subj_{subj_N}", {}).get(f"sess_{sess_N}", [])
+    # sess_info, raw_behav, raw_eeg, raw_et, et_cals = load_raw_data(subj_N, sess_N, c.DATA_DIR, c.EEG_MONTAGE, bad_chans)
+    # ! TEMP
+
+    fpath = Path(raw_eeg.filenames[0])
+    subj_N = int(fpath.parents[1].name.split("_")[1])
+    sess_dir = fpath.parents[0]
+    sess_N = int(sess_dir.name.split("_")[1])
+
+    # * Create preprocessed_dir and ica_dir if they don't exist
+    ica_dir = preprocessed_dir / "ICA"
+    ica_dir.mkdir(exist_ok=True, parents=True)
+
+    preprocessed_raw_fpath = (
+        preprocessed_dir / f"subj_{subj_N:02}{sess_N:02}_preprocessed-raw.fif"
+    )
+
+    if not preprocessed_raw_fpath.exists() or force is True:
+        print("Preprocessing raw data...")
+        raw_eeg.load_data(verbose="WARNING")
+        prepro_eeg = raw_eeg.copy()
+        del raw_eeg
+
+        # * Detecting events
+        eeg_events = mne.find_events(
+            prepro_eeg,
+            min_duration=0,
+            initial_event=False,
+            shortest_event=1,
+            uint_cast=True,
+            verbose="WARNING",
+        )
+
+        # # ! TEMP
+        # df = pd.DataFrame(eeg_events, columns=["sample_nb", "prev", "event_id"])
+        # df["event_id"] = df["event_id"].replace(VALID_EVENTS_INV)
+        # ! TEMP
+
+        # * Get annotations from events and add them to the raw data
+        annotations = mne.annotations_from_events(
+            eeg_events,
+            prepro_eeg.info["sfreq"],
+            event_desc=c.VALID_EVENTS_INV,
+            verbose="WARNING",
+        )
+
+        prepro_eeg.set_annotations(annotations, verbose="WARNING")
+
+        bad_chans = prepro_eeg.info["bads"]
+
+        # TODO: automatically remove bad channels (e.g., amplitude cutoff)
+
+        manually_set_bad_chans = c.ALL_BAD_CHANS.get(f"subj_{subj_N}", {}).get(
+            f"sess_{sess_N}"
+        )
+
+        if not bad_chans == manually_set_bad_chans:
+            print(
+                "WARNING: raw EEG bad channels do not match expected bad channels, combining them"
+            )
+
+        bad_chans = list(set(bad_chans) | set(manually_set_bad_chans))
+
+        prepro_eeg.info["bads"] = bad_chans
+
+        # prepro_eeg.drop_channels(bad_chans)
+
+        # * Check if channel groups include all channels present in the montage
+        # * i.e., that there are no "orphan" channels
+        check_ch_groups(prepro_eeg.get_montage(), eeg_chan_groups)
+
+        # * Average Reference
+        prepro_eeg = prepro_eeg.set_eeg_reference(
+            ref_channels="average", verbose="WARNING"
+        )
+
+        # * Filter to remove power line noise
+        prepro_eeg.notch_filter(freqs=np.arange(50, 251, 50), verbose="WARNING")
+
+        # * Bandpass Filter: 1-100 Hz
+        prepro_eeg.filter(l_freq=1, h_freq=100, verbose="WARNING")
+
+        # * ############################################################################
+        # * EOG artifact rejection using ICA
+        # * ############################################################################
+
+        ica_fpath = ica_dir / f"subj_{subj_N:02}{sess_N:02}_fitted-ica.fif"
+
+        if ica_fpath.exists() and reuse_ica is True:
+            # * if ICA file exists, load it
+            ica = mne.preprocessing.read_ica(ica_fpath)
+
+        else:
+            # * Create a copy of the raw data to hihg-pass filter at 1Hz before ICA
+            # * as recommended by MNE: https://mne.tools/stable/generated/mne.preprocessing.ICA.html
+            # prepro_eeg_copy_for_ica = prepro_eeg.copy()
+            # prepro_eeg.filter(l_freq=1, h_freq=100, verbose="WARNING")
+
+            ica = mne.preprocessing.ICA(
+                n_components=None,
+                noise_cov=None,
+                random_state=c.RAND_SEED,
+                # method="fastica",
+                method="infomax",
+                fit_params=dict(extended=True),
+                max_iter="auto",
+                verbose="WARNING",
+            )
+
+            ica.fit(prepro_eeg, verbose="WARNING")
+
+            ica.save(ica_fpath, verbose="WARNING")
+
+        # eog_inds, eog_scores = ica.find_bads_eog(prepro_eeg)
+        # ica.exclude = eog_inds
+
+        # # * Label components using IClabel
+        ic_labels = label_components(prepro_eeg, ica, method="iclabel")
+
+        # df_labels = pd.DataFrame(
+        #     list(zip(list(ic_labels["y_pred_proba"]), ic_labels["labels"])), columns=['prob', 'label']
+        # ).sort_values(by='prob', ascending=False)
+
+        # # * Get indices of components labeled as 'brain'
+        brain_ic_indices = [
+            idx for idx, label in enumerate(ic_labels["labels"]) if label == "brain"
+        ]
+
+        # # * Keep only brain components, effectively rejecting artifactual ones
+        ica.exclude = [
+            idx for idx in range(ica.n_components_) if idx not in brain_ic_indices
+        ]
+
+        # * Apply ICA to raw data
+        prepro_eeg = ica.apply(prepro_eeg, verbose="WARNING")
+
+        # * Interpolate bad channels and remove them from "bads" list in eeg info
+        prepro_eeg = prepro_eeg.interpolate_bads(reset_bads=True)
+
+        # * Set average reference again, including interpolated bad channels
+        prepro_eeg = prepro_eeg.set_eeg_reference(
+            ref_channels="average", verbose="WARNING"
+        )
+
+        # * Add bad channels to the "bads" list in eeg info again
+        prepro_eeg.info["bads"] = bad_chans
+
+        # * Save preprocessed raw data
+        prepro_eeg.save(preprocessed_raw_fpath, overwrite=True, verbose="WARNING")
+
+    else:
+        prepro_eeg = mne.io.read_raw_fif(
+            preprocessed_raw_fpath, preload=False, verbose="WARNING"
+        )
+
+    # split_eeg_data_into_trials(prepro_eeg, raw_behav)
+
+    return prepro_eeg
 
 
 def get_response_ERP(eeg_data, show=False):
@@ -2024,11 +2109,11 @@ def get_neg_erp_peak(
 # * ####################################################################################
 def analyze_session(subj_N: int, sess_N: int, save_dir: Path, preprocessed_dir: Path):
     """ """
-    # ! TEMP
-    # preprocessed_dir = EXPORT_DIR / "preprocessed_data"
+    # # ! TEMP
+    # preprocessed_dir = c.EXPORT_DIR / "preprocessed_data"
     # subj_N = 4
     # sess_N = 1
-    # save_dir = EXPORT_DIR / f"subj_{subj_N:02}-sess_{sess_N:02}"
+    # save_dir = c.EXPORT_DIR / f"subj_{subj_N:02}-sess_{sess_N:02}"
     # ! TEMP
 
     save_dir.mkdir(exist_ok=True, parents=True)
@@ -2039,7 +2124,7 @@ def analyze_session(subj_N: int, sess_N: int, save_dir: Path, preprocessed_dir: 
     bad_chans = c.ALL_BAD_CHANS.get(f"subj_{subj_N}", {}).get(f"sess_{sess_N}", [])
 
     # * Load the data
-    sess_info, _, raw_behav, raw_eeg, raw_et, et_cals = load_raw_data(
+    sess_info, raw_behav, raw_eeg, raw_et, et_cals = load_raw_data(
         subj_N, sess_N, c.DATA_DIR, c.EEG_MONTAGE, bad_chans
     )
 
@@ -2068,18 +2153,20 @@ def analyze_session(subj_N: int, sess_N: int, save_dir: Path, preprocessed_dir: 
         # et_trial_events_df,
     ) = preprocess_et_data(raw_et, et_cals)
 
+    prepro_eeg = preprocess_eeg_data(
+        raw_eeg=raw_eeg,
+        eeg_chan_groups=c.EEG_CHAN_GROUPS,
+        raw_behav=raw_behav,
+        preprocessed_dir=preprocessed_dir,
+        force=False,
+    )
     (
         manual_eeg_trials,
         *_,
         # eeg_trial_bounds,
         # eeg_events,
         # eeg_events_df,
-    ) = preprocess_eeg_data(
-        raw_eeg,
-        c.EEG_CHAN_GROUPS,
-        raw_behav,
-        preprocessed_dir=preprocessed_dir,
-    )
+    ) = split_eeg_data_into_trials(prepro_eeg, raw_behav)
 
     bad_chans = raw_eeg.info["bads"]
 
@@ -2163,14 +2250,14 @@ def analyze_session(subj_N: int, sess_N: int, save_dir: Path, preprocessed_dir: 
 
 def main(data_dir: Path, preprocessed_dir: Path, save_dir: Path):
     # ! TEMP
-    # data_dir = DATA_DIR
+    # data_dir = c.DATA_DIR
     # save_dir = EXPORT_DIR / "analyzed/subj_lvl"
     # preprocessed_dir = EXPORT_DIR / "preprocessed_data"
     # ! TEMP
 
     save_dir.mkdir(exist_ok=True, parents=True)
 
-    n_subjs = len(list(c.DATA_DIR.glob("subj_*")))
+    n_subjs = len(list(data_dir.glob("subj_*")))
 
     errors = []
     for subj_N in tqdm(
@@ -2183,7 +2270,7 @@ def main(data_dir: Path, preprocessed_dir: Path, save_dir: Path):
         # trial_N = 1
         # # ! TEMP
 
-        subj_dir = c.DATA_DIR / f"subj_{subj_N:02}"
+        subj_dir = data_dir / f"subj_{subj_N:02}"
 
         n_sessions = len(list(subj_dir.glob("sess_*")))
 
@@ -2450,15 +2537,447 @@ def analyze_processed_frp_data_all_subj(
 # * ####################################################################################
 # * REPRESENTATIONAL SIMILARITY ANALYSIS
 # * ####################################################################################
+def get_response_locked_eeg_rdm_all_subj(save_dir: Path, preprocessed_dir: Path):
+    # # ! TEMP
+    # preprocessed_dir = c.EXPORT_DIR / "preprocessed_data-SAVE"
+    # dissimilarity_metric = "correlation"
+    # save_dir = (
+    #     c.EXPORT_DIR
+    #     / f"analyzed/RSA-Response_ERP-last_chan_removed-{dissimilarity_metric}"
+    # )
+    # similarity_metric = "corr"
+    # # ! TEMP
+
+    save_dir.mkdir(exist_ok=True, parents=True)
+
+    if not preprocessed_dir.exists():
+        raise FileNotFoundError(
+            f"Preprocessed data directory not found, check path: {preprocessed_dir}"
+        )
+
+    prepro_eeg_files = [
+        f
+        for f in preprocessed_dir.glob("*-raw.fif")
+        if f.is_file() and not f.name.startswith(".")
+    ]
+    subjects = [int(re.search(r"subj_(\d{2})", f.name)[1]) for f in prepro_eeg_files]
+    subjects = sorted(set(subjects))
+
+    # * ----------------------------------------
+    # * ----------------------------------------
+    resp_events = ["a", "x", "m", "l", "invalid", "timeout"]
+    # subjects = [4, 5]
+
+    eeg_data = dict()
+    behav_data = []
+
+    for subj_N in tqdm(subjects):
+        eeg_files = sorted(
+            [f for f in prepro_eeg_files if f"subj_{subj_N:02}" in f.name]
+        )
+
+        subj_eeg_data = []
+        subj_behav_data = []
+
+        for eeg_file in eeg_files:
+            sess_N = re.search(r"subj_\d{2}(\d{2})", eeg_file.name)
+
+            if sess_N is not None:
+                sess_N = int(sess_N[1])
+            else:
+                raise ValueError(f"session number not found in file name: {eeg_file}")
+
+            sess_behav = load_and_clean_behav_data(c.DATA_DIR, subj_N, sess_N)
+
+            sess_prepro_eeg = mne.io.read_raw(eeg_file, verbose=False)
+            sess_prepro_eeg.info["bads"] = []  # ! TEMP
+
+            eeg_trials, eeg_trial_bounds, eeg_events, eeg_events_df = (
+                split_eeg_data_into_trials(
+                    sess_prepro_eeg, sess_behav, incomplete="skip"
+                )
+            )
+
+            if eeg_trials is None:
+                continue
+            else:
+                eeg_trials = list(eeg_trials)
+                subj_eeg_data.extend(eeg_trials)
+                subj_behav_data.append(sess_behav)
+
+                # # ! TEMP
+                sess_eeg = copy.deepcopy(eeg_trials)
+                sess_eeg = mne.concatenate_raws(sess_eeg)
+                sess_annotations = sess_eeg.annotations.to_data_frame()["description"]
+
+                sess_filtered_events = [a for a in sess_annotations if a in resp_events]
+                sess_filtered_events = list(set(sess_filtered_events))
+
+                sess_epochs = mne.Epochs(
+                    sess_eeg,
+                    # event_id=["trial_end"],
+                    event_id=sess_filtered_events,
+                    tmin=-1.0,
+                    tmax=0,
+                    baseline=None,
+                    verbose=False,
+                )
+                evoked = sess_epochs.average()
+                fig = evoked.plot(show=False)
+                fig.savefig(save_dir / f"ERP-subj{subj_N:02}{sess_N:02}.png")
+                plt.close()
+                # # ! TEMP
+
+        subj_behav_data = pd.concat(subj_behav_data).reset_index()
+
+        reordered_inds = reorder_item_ids(
+            original_order_df=subj_behav_data,
+            new_order_df=c.ITEM_ID_SORT[["pattern", "item_id"]],
+        )
+
+        subj_behav_data = subj_behav_data.iloc[reordered_inds].reset_index()
+
+        subj_eeg_data = mne.concatenate_raws([subj_eeg_data[i] for i in reordered_inds])
+
+        annotations = subj_eeg_data.annotations.to_data_frame()["description"]
+        filtered_events = [a for a in annotations if a in resp_events]
+
+        # * Check if data is complete (participants have finished all their sessions)
+        n_trials = len(filtered_events)
+
+        if not n_trials == 400:
+            print(f"WARNING: missing data for subj {subj_N}")
+            print(f"\t {n_trials} trials found")
+            continue
+
+        filtered_events = list(set(filtered_events))
+
+        epochs = mne.Epochs(
+            subj_eeg_data,
+            # event_id=["trial_end"],
+            event_id=filtered_events,
+            tmin=-1.0,
+            tmax=0,
+            baseline=None,
+            verbose=False,
+        )
+
+        eeg_data[subj_N] = epochs  # .get_data(picks=c.EEG_CHAN_GROUPS.all)
+        behav_data.append(subj_behav_data)
+
+    included_subjects = list(eeg_data.keys())
+    eeg_data = list(eeg_data.values())
+
+    behav_data = pd.concat(behav_data)
+
+    # ! TEMP
+    eeg_data_arr = np.array([d.get_data(picks=c.EEG_CHAN_GROUPS.all) for d in eeg_data])
+
+    eeg_data_group_avg = eeg_data_arr[1:].mean(axis=0)
+    info = mne.create_info(c.EEG_CHAN_GROUPS.all, 2048, ch_types="eeg", verbose=None)
+    eeg_data_group_avg = mne.EpochsArray(eeg_data_group_avg, info)
+    montage = c.EEG_MONTAGE
+    eeg_data_group_avg.set_montage(montage)
+    eeg_data_group_avg.average().plot()
+    plt.plot(eeg_data_group_avg[0].T)
+    # ! TEMP
+
+    evokeds = [d.average() for d in eeg_data]
+    for evoked in evokeds:
+        evoked.plot()
+
+    # eeg_data[0][:1].average().plot()
+
+    # * ----------------------------------------
+    # * ----------------------------------------
+
+    group_eeg_data_seq_lvl = []
+    group_eeg_data_patt_lvl = []
+
+    for subj_N in tqdm(subjects):
+        eeg_fpaths = sorted(
+            [f for f in preprocessed_eeg_data if f"subj_{subj_N:02}" in f.name]
+        )
+
+        sess_Ns = [int(re.search(r"subj_\d{2}(\d{2})", f.name)[1]) for f in eeg_fpaths]
+
+        raw_behav = pd.concat(
+            [
+                load_and_clean_behav_data(c.DATA_DIR, subj_N, sess_N)
+                for sess_N in sess_Ns
+            ]
+        )
+        raw_behav.reset_index(inplace=True)
+
+        subj_eeg_data = [
+            mne.io.read_raw(f, preload=False, verbose="WARNING") for f in eeg_fpaths
+        ]
+
+        epochs = [
+            mne.Epochs(
+                d,
+                # event_id=["trial_end"],
+                event_id=["a", "x", "m", "l", "timeout"],
+                tmin=-1.0,
+                tmax=0,
+                baseline=None,
+                verbose=False,
+            )
+            for d in subj_eeg_data
+        ]
+
+        # epochs = mne.concatenate_epochs(epochs)
+        for i, eps in enumerate(epochs, start=1):
+            evoked = eps.average()
+
+            fig = evoked.plot()
+            fig.savefig(save_dir / f"response_lock_ERP-subj_{subj_N}-{i}", dpi=300)
+
+        # del subj_eeg_data
+
+        eeg_data_seq_lvl = [ep.get_data(picks=c.EEG_CHAN_GROUPS.all) for ep in epochs]
+
+        # * Remove practice trials
+        if eeg_data_seq_lvl[0].shape[0] > 80:
+            eeg_data_seq_lvl[0] = eeg_data_seq_lvl[0][3:]
+
+        eeg_data_seq_lvl = np.concatenate(eeg_data_seq_lvl)
+
+        if eeg_data_seq_lvl.shape[0] != raw_behav.shape[0]:
+            print(
+                f"WARNING: different number of trials between EEG and behavioral data for subj {subj_N}. Skipping..."
+            )
+            continue
+
+        # * Reorder the data
+        reordered_inds = reorder_item_ids(
+            original_order_df=raw_behav,
+            new_order_df=c.ITEM_ID_SORT[["pattern", "item_id"]],
+        )
+        raw_behav = raw_behav.iloc[reordered_inds]
+        raw_behav.reset_index(inplace=True)
+        eeg_data_seq_lvl = eeg_data_seq_lvl[reordered_inds]
+
+        #! TEMP
+        # eeg_data_seq_lvl = eeg_data_seq_lvl[:, :63, :]
+        #! TEMP
+
+        group_eeg_data_seq_lvl.append(eeg_data_seq_lvl)
+
+        # * Get reference RDMs
+        ref_rdm_seq_lvl, ref_rdm_patt_lvl = get_reference_rdms(
+            eeg_data_seq_lvl.shape[0], int(eeg_data_seq_lvl.shape[0] / 8)
+        )
+
+        ref_rdm_seq_lvl = RDMs(
+            dissimilarities=ref_rdm_seq_lvl[None, :],
+            pattern_descriptors={"patterns": list(raw_behav["pattern"])},
+        )
+
+        ref_rdm_patt_lvl = RDMs(
+            dissimilarities=ref_rdm_patt_lvl[None, :],
+            pattern_descriptors={"patterns": c.PATTERNS},
+        )
+        # * ----------------------------------------
+        # * Sequence level analysis
+        # * ----------------------------------------
+
+        dataset = Dataset(
+            measurements=eeg_data_seq_lvl[:, :, :].mean(axis=1),
+            obs_descriptors={
+                "item_ids": list(raw_behav["item_id"]),
+                "patterns": list(raw_behav["pattern"]),
+            },
+        )
+
+        rdm_sequence_lvl = calc_rdm(dataset, method=dissimilarity_metric)
+
+        # * Save the RDM
+        fname = f"rdm-human-subj_{subj_N:02}-sequence_lvl-all_chans.hdf5"
+        fpath = save_dir / fname
+        rdm_sequence_lvl.save(fpath, file_type="hdf5", overwrite=True)
+
+        # * Plot the RDM and save the figure
+        fig, ax = plot_rdm(rdm_sequence_lvl, "patterns", True)
+        ax.set_title(f"RDM - subj {subj_N:02} - sequence level \n all chans")
+        fig.savefig(fpath.with_suffix(".png"), dpi=300, bbox_inches="tight")
+        plt.close()
+
+        temporal_ds = TemporalDataset(
+            measurements=eeg_data_seq_lvl,
+            obs_descriptors={
+                "item_ids": list(raw_behav["item_id"]),
+                "patterns": list(raw_behav["pattern"]),
+            },
+        )
+
+        rdms_per_timestep = calc_rdm_movie(temporal_ds, method=dissimilarity_metric)
+
+        rdm_comparison = np.array(
+            [
+                compare_rdms(ref_rdm_seq_lvl, ts_rdm, method=similarity_metric).item()
+                for ts_rdm in rdms_per_timestep
+            ]
+        )
+
+        fig, ax = plt.subplots()
+        ax.plot(rdm_comparison)  # , marker="o")
+        title = f"Timestep Similarity with Reference RDM\nSubj {subj_N}"
+        ax.set_title(title)
+        ax.set_xlabel("Timestep")
+        ax.set_ylabel("Correlation")
+        ax.grid(True, ls="--")
+        fname = f"{title.lower().replace(' ', '_').replace('\n', '_')}.png"
+        fpath = save_dir / fname
+        fig.savefig(fpath, dpi=200, bbox_inches="tight")
+        plt.close()
+
+        # for i in np.linspace(0, rdms_per_timestep.n_rdm - 1).astype(int):
+        #     plot_rdm(rdms_per_timestep[i], cluster_name="patterns")
+        #     plt.show()
+
+        # * Select the timepoint RDM that is most similar to the reference RDM
+        best_timestep_rdm_ind = np.argmax(rdm_comparison)
+        rdm_sequence_lvl_tp = rdms_per_timestep[best_timestep_rdm_ind]
+
+        # * Save the RDM
+        fname = f"rdm-human-subj_{subj_N:02}-sequence_lvl-all_chans-ts_{best_timestep_rdm_ind}.hdf5"
+        fpath = save_dir / fname
+        rdm_sequence_lvl_tp.save(fpath, file_type="hdf5", overwrite=True)
+
+        # * Plot the RDM and save the figure
+        fig, ax = plot_rdm(rdm_sequence_lvl_tp, "patterns", True)
+        ax.set_title(
+            f"RDM - subj {subj_N:02} - sequence level \n all chans - Timestep {best_timestep_rdm_ind}"
+        )
+        fig.savefig(fpath.with_suffix(".png"), dpi=300, bbox_inches="tight")
+        plt.close()
+
+        # * ----------------------------------------
+        # * Pattern level analysis
+        # * ----------------------------------------
+        eeg_data_patt_lvl = {p: [] for p in c.PATTERNS}
+
+        for i, patt in raw_behav["pattern"].items():
+            eeg_data_patt_lvl[patt].append(eeg_data_seq_lvl[i])
+
+        eeg_data_patt_lvl = np.array(
+            [np.array(v) for v in eeg_data_patt_lvl.values()]
+        ).mean(axis=1)
+
+        group_eeg_data_patt_lvl.append(eeg_data_patt_lvl)
+
+        ds = Dataset(
+            eeg_data_patt_lvl.mean(axis=1), obs_descriptors={"patterns": c.PATTERNS}
+        )
+        rdm_patt_lvl = calc_rdm(ds, dissimilarity_metric)
+
+        # * Save the RDM
+        fname = f"rdm-human-subj_{subj_N:02}-pattern_lvl-all_chans.hdf5"
+        fpath = save_dir / fname
+        rdm_sequence_lvl_tp.save(fpath, file_type="hdf5", overwrite=True)
+
+        # * Plot the RDM and save the figure
+        fig, ax = plot_rdm(rdm_patt_lvl, "patterns")
+        ax.set_title(f"RDM - subj {subj_N:02} - pattern level \n all chans")
+        fig.savefig(fpath.with_suffix(".png"), dpi=300, bbox_inches="tight")
+        plt.close()
+
+    filtered_data = [arr for arr in group_eeg_data_seq_lvl if arr.shape[0] == 400]
+
+    group_eeg_data_seq_lvl = np.array(filtered_data)
+
+    fname = "all_subj-response_erp_data.npy"
+    fpath = save_dir / fname
+    np.save(fpath, group_eeg_data_seq_lvl, allow_pickle=True)
+
+    group_eeg_data_patt_lvl = np.array(group_eeg_data_patt_lvl)
+
+    ds = Dataset(
+        measurements=group_eeg_data_patt_lvl[:, :, :].mean(axis=0).mean(axis=1),
+        obs_descriptors={
+            # "item_ids": c.ITEM_ID_SORT["item_id"],
+            "patterns": c.PATTERNS,
+        },
+    )
+    rdm = calc_rdm(ds, dissimilarity_metric)
+
+    plot_rdm(rdm, "patterns")
+
+    # group_eeg_data = np.load(fpath)
+    # group_eeg_data.shape
+    # group_eeg_data[0][:, :30].mean(axis=1).shape
+
+    # for subj_N in range(group_eeg_data.shape[0]):
+    #     ds = Dataset(
+    #         measurements=group_eeg_data[subj_N][:, :30].mean(axis=1),
+    #         obs_descriptors={
+    #             "item_ids": c.ITEM_ID_SORT["item_id"],
+    #             "patterns": c.ITEM_ID_SORT["pattern"],
+    #         },
+    #     )
+    #     rdm = calc_rdm(ds, method=dissimilarity_metric)
+    #     fig, ax = plot_rdm(rdm, "patterns")
+    #     plt.show()
+
+    # plt.close("all")
+
+    group_eeg_data_avg = group_eeg_data_seq_lvl.mean(axis=0)
+
+    ds = Dataset(
+        measurements=group_eeg_data_avg[:, :, :].mean(axis=1),
+        obs_descriptors={
+            "item_ids": c.ITEM_ID_SORT["item_id"],
+            "patterns": c.ITEM_ID_SORT["pattern"],
+        },
+    )
+
+    rdm = calc_rdm(ds, method=dissimilarity_metric)
+    plot_rdm(rdm, cluster_name="patterns", separate_clusters=True)
+
+    temporal_ds = TemporalDataset(
+        measurements=group_eeg_data_avg,
+        obs_descriptors={
+            "item_ids": c.ITEM_ID_SORT["item_id"],
+            "patterns": c.ITEM_ID_SORT["pattern"],
+        },
+    )
+    rdms_per_timestep = calc_rdm_movie(temporal_ds, method=dissimilarity_metric)
+
+    rdm_comparison = np.array(
+        [
+            compare_rdms(ref_rdm_seq_lvl, ts_rdm, method=similarity_metric).item()
+            for ts_rdm in rdms_per_timestep
+        ]
+    )
+
+    fig, ax = plt.subplots()
+    ax.plot(rdm_comparison)  # , marker="o")
+    title = f"Timestep Similarity with Reference RDM\nAll Subj"
+    ax.set_title(title)
+    ax.set_xlabel("Timestep")
+    ax.set_ylabel("Correlation")
+    ax.grid(True, ls="--")
+    fname = f"{title.lower().replace(' ', '_').replace('\n', '_')}.png"
+    fpath = save_dir / fname
+    fig.savefig(fpath, dpi=200, bbox_inches="tight")
+    plt.close()
+
+    # * Select the timepoint RDM that is most similar to the reference RDM
+    ind_most_similar = np.argmax(rdm_comparison)
+    rdm_sequence_lvl = rdms_per_timestep[ind_most_similar]
+    plot_rdm(rdm_sequence_lvl, cluster_name="patterns")
+
+
 def get_frp_rdms_all_subj(
     data_dir: Path,
     processed_data_dir: Path,
     save_dir: Path,
     dissimilarity_metric: str,
     selected_chan_group: str,
-    # TODO: time_window: Optional[Tuple[float]] = None,
+    time_window: Optional[Tuple[float, float]] = None,
 ):
-    """TODO:_summary_
+    """TODO: summary
 
     Args:
         data_dir (Path): _description_
@@ -2466,6 +2985,7 @@ def get_frp_rdms_all_subj(
         save_dir (Path): _description_
         dissimilarity_metric (str): _description_
         selected_chan_group (str): _description_
+        time_window (Optional[Tuple[float]], optional): _description_. Defaults to None.
     """
 
     # # ! TEMP
@@ -2479,59 +2999,8 @@ def get_frp_rdms_all_subj(
     # save_dir = (
     #     c.EXPORT_DIR / f"analyzed/RSA-FRP-{chan_group}-metric_{dissimilarity_metric}"
     # )
+    # time_window = (0, 0.6)
     # # ! TEMP
-
-    def _plot_rdm(
-        rdm: rsatoolbox.rdm.rdms.RDMs,
-        cluster_name: str = "patterns",
-        separate_clusters: bool = False,
-    ):
-        dpi = 500
-        clusters = rdm.pattern_descriptors[cluster_name]
-
-        clusters_last_inds = (
-            pd.Series(clusters, name=cluster_name).value_counts().cumsum()
-        )
-
-        tick_labels = clusters_last_inds.index
-        tick_marks = np.array(
-            [0] + clusters_last_inds.values.tolist()
-        )  # , dtype=float)
-
-        rdm_array = rdm.get_matrices()[0]
-
-        # * Add rows and columns of nans to separate clusters
-        if separate_clusters:
-            for i, tick_mark in enumerate(tick_marks):
-                if i == 0:
-                    tick_marks[i:] += 1
-                else:
-                    tick_marks[i:] += 1
-                rdm_array = np.insert(rdm_array, tick_mark, np.nan, axis=0)
-                rdm_array = np.insert(rdm_array, tick_mark, np.nan, axis=1)
-
-            tick_marks -= 1
-            tick_marks_labels = np.array(tick_marks[:-1]) + np.diff(tick_marks) / 2
-        else:
-            tick_marks = tick_marks.astype(float)
-            tick_marks -= 0.5
-            tick_marks_labels = np.array(tick_marks[:-1]) + np.diff(tick_marks) / 2
-
-        fig, ax = plt.subplots(dpi=dpi)
-        im = ax.imshow(rdm_array)
-        # ax.set_title(f"subj {rdm.rdm_descriptors['subj_N'][0]} RDM")
-        ax.set_aspect("equal")
-        fig.colorbar(im, ax=ax)
-        ax.xaxis.set_minor_locator(ticker.FixedLocator(tick_marks))
-        ax.xaxis.set_major_locator(ticker.FixedLocator(tick_marks_labels))
-        ax.xaxis.set_major_formatter(ticker.FixedFormatter(tick_labels))
-        ax.tick_params(axis="x", labelrotation=90)
-
-        ax.yaxis.set_minor_locator(ticker.FixedLocator(tick_marks))
-        ax.yaxis.set_major_locator(ticker.FixedLocator(tick_marks_labels))
-        ax.yaxis.set_major_formatter(ticker.FixedFormatter(tick_labels))
-
-        return fig, ax
 
     save_dir.mkdir(exist_ok=True, parents=True)
 
@@ -2559,6 +3028,7 @@ def get_frp_rdms_all_subj(
     subj_data: dict = {int(subj): {} for subj in behav_data["subj_N"].unique()}
 
     missing_frps = []
+
     for frp_file in sorted(frp_files):
         subj_N = int(frp_file.parents[1].name.split("_")[-1])
         sess_N = int(frp_file.parents[0].name.split("_")[-1])
@@ -2577,25 +3047,47 @@ def get_frp_rdms_all_subj(
         if sess_missing_frps := [i for i, s in enumerate(sequence_frps) if s is None]:
             missing_frps.append((subj_N, sess_N, sess_missing_frps))
 
-        data_shape = (
-            [s for s in sequence_frps if s is not None][0]
-            .get_data(picks=selected_chans)
-            .shape
-        )
+        if time_window:
+            data_shape = (
+                [s for s in sequence_frps if s is not None][0]
+                .copy()
+                .crop(*time_window)
+                .get_data(picks=selected_chans)
+                .shape
+            )
 
-        empty_data = np.zeros(data_shape)
-        empty_data[:] = np.nan
+            empty_data = np.zeros(data_shape)
+            empty_data[:] = np.nan
 
-        sequence_frps = [
-            frp.get_data(picks=selected_chans) if frp is not None else empty_data
-            for frp in sequence_frps
-        ]
+            sequence_frps = [
+                frp.copy().crop(*time_window).get_data(picks=selected_chans)
+                if frp is not None
+                else empty_data
+                for frp in sequence_frps
+            ]
+
+        else:
+            data_shape = (
+                [s for s in sequence_frps if s is not None][0]
+                .copy()
+                .get_data(picks=selected_chans)
+                .shape
+            )
+
+            empty_data = np.zeros(data_shape)
+            empty_data[:] = np.nan
+
+            sequence_frps = [
+                frp.copy().get_data(picks=selected_chans)
+                if frp is not None
+                else empty_data
+                for frp in sequence_frps
+            ]
 
         subj_data[subj_N][sess_N] = [
             sess_item_ids,
             sess_patterns,
             sequence_frps,
-            # timepoints,
         ]
 
     # * Show missing FRPs
@@ -2610,8 +3102,10 @@ def get_frp_rdms_all_subj(
     subj_data = {k: v for k, v in subj_data.items() if len(v) > 0}
 
     subj_rdms = []
+
     _group_average_rdm = []
     _group_patterns = []
+    _group_item_ids = []
     _pattern_frps_avg = {p: [] for p in c.PATTERNS}
 
     for subj_N in sorted(subj_data.keys()):
@@ -2674,11 +3168,68 @@ def get_frp_rdms_all_subj(
         subj_patterns = subj_patterns[reordered_inds]
         subj_item_ids = subj_item_ids[reordered_inds]
 
-        # temporal_ds = ds = TemporalDataset(
-        #     measurements=subj_frps,
-        # )
-        # rdm_per_timestep = calc_rdm_movie(ds, method=dissimilarity_metric)
-        # # rdm_per_timestep = rdm.get_matrices()
+        # * Get reference RDMs
+        ref_rdm_seq_lvl, ref_rdm_patt_lvl = get_reference_rdms(
+            subj_frps.shape[0], int(subj_frps.shape[0] / 8)
+        )
+
+        ref_rdm_seq_lvl = RDMs(
+            dissimilarities=ref_rdm_seq_lvl[None, :],
+            pattern_descriptors={"patterns": subj_patterns},
+        )
+
+        ref_rdm_patt_lvl = RDMs(
+            dissimilarities=ref_rdm_patt_lvl[None, :],
+            pattern_descriptors={"patterns": c.PATTERNS},
+        )
+
+        # * -------- Compute Subject-Sequence Level RDM at every time step  --------
+        temporal_ds = TemporalDataset(
+            measurements=subj_frps,
+            descriptors={"subj_N": subj_N},
+            obs_descriptors={"patterns": subj_patterns, "item_ids": subj_item_ids},
+            time_descriptors={"time": np.arange(subj_frps.shape[-1])},
+        )
+
+        rdms_per_timestep = calc_rdm_movie(temporal_ds, method=dissimilarity_metric)
+
+        rdm_comparison = np.array(
+            [
+                compare_rdms(ref_rdm_seq_lvl, ts_rdm).item()
+                for ts_rdm in rdms_per_timestep
+            ]
+        )
+
+        fig, ax = plt.subplots()
+        ax.plot(rdm_comparison, marker="o")
+        title = f"Timestep Similarity with Reference RDM\nSubj {subj_N:02}"
+        ax.set_title(title)
+        ax.set_xlabel("Timestep")
+        ax.set_ylabel("Correlation")
+        ax.grid(True, ls="--")
+        fname = f"{title.lower().replace(' ', '_').replace('\n', '_')}.png"
+        fpath = save_dir / fname
+        fig.savefig(fpath, dpi=200, bbox_inches="tight")
+        plt.close()
+
+        best_timestep_rdm_ind = np.argmax(rdm_comparison)
+        rdm = rdms_per_timestep[best_timestep_rdm_ind]
+
+        # * Save the RDM
+        fname = f"rdm-human-subj_{subj_N:02}-sequence_lvl-{selected_chan_group}-ts_{best_timestep_rdm_ind}.hdf5"
+        fpath = save_dir / fname
+        rdm.save(fpath, file_type="hdf5", overwrite=True)
+
+        # * Plot the RDM and save the figure
+        fig, ax = plot_rdm(rdm, "patterns")
+        ax.set_title(
+            f"RDM - subj {subj_N:02} - sequence level \n {selected_chan_group} chans - Timestep {best_timestep_rdm_ind}"
+        )
+        fig.savefig(fpath.with_suffix(".png"), dpi=300, bbox_inches="tight")
+        # plt.show()
+        plt.close()
+
+        # * -------- Compute Subject-Sequence Level RDM  --------
 
         # * Flatten FRPs across channels into a new array of shape (n_items, n_channels * n_timepoints)
         # flattened_frps = subj_frps.reshape(subj_frps.shape[0], -1)
@@ -2686,12 +3237,16 @@ def get_frp_rdms_all_subj(
         # * Compute the average FRP across all channels
         subj_frps = subj_frps.mean(axis=1)
 
-        # * -------- Compute Subject-Item Level RDM  --------
         dataset = Dataset(
             measurements=subj_frps,
             descriptors={"subj_N": subj_N},
             obs_descriptors={"patterns": subj_patterns, "item_ids": subj_item_ids},
         )
+        fname = (
+            f"dataset-human-subj_{subj_N:02}-sequence_lvl-{selected_chan_group}.hdf5"
+        )
+        fpath = save_dir / fname
+        dataset.save(fpath, file_type="hdf5", overwrite=True)
 
         # * Compute RDM
         rdm = calc_rdm(dataset, method=dissimilarity_metric)
@@ -2704,16 +3259,17 @@ def get_frp_rdms_all_subj(
         if rdm_array.shape[0] == 400:
             _group_average_rdm.append(rdm_array)
             _group_patterns.append(subj_patterns)
+            _group_item_ids.append(subj_item_ids)
 
         # * Save the RDM
-        fname = f"rdm-human-subj_{subj_N:02}-item_lvl-{selected_chan_group}.hdf5"
+        fname = f"rdm-human-subj_{subj_N:02}-sequence_lvl-{selected_chan_group}.hdf5"
         fpath = save_dir / fname
         rdm.save(fpath, file_type="hdf5", overwrite=True)
 
         # * Plot the RDM and save the figure
-        fig, ax = _plot_rdm(rdm, separate_clusters=True)
+        fig, ax = plot_rdm(rdm, cluster_name="patterns", separate_clusters=True)
         ax.set_title(
-            f"RDM - subj {subj_N:02} - item level \n {selected_chan_group} chans"
+            f"RDM - subj {subj_N:02} - sequence level \n {selected_chan_group} chans"
         )
         fig.savefig(fpath.with_suffix(".png"), dpi=300, bbox_inches="tight")
         # plt.show()
@@ -2729,6 +3285,9 @@ def get_frp_rdms_all_subj(
             # channel_descriptors={"names": [f"average_of_{selected_chan_group}_chans"]},
             obs_descriptors={"patterns": list(pattern_frps_avg.keys())},
         )
+        fname = f"dataset-human-subj_{subj_N:02}-pattern_lvl-{selected_chan_group}.hdf5"
+        fpath = save_dir / fname
+        dataset.save(fpath, file_type="hdf5", overwrite=True)
 
         # * Compute RDM
         rdm = calc_rdm(dataset, method=dissimilarity_metric)
@@ -2738,7 +3297,7 @@ def get_frp_rdms_all_subj(
         rdm.save(fpath, file_type="hdf5", overwrite=True)
 
         # * Plot the RDM and save the figure
-        fig, ax = _plot_rdm(rdm, separate_clusters=False)
+        fig, ax = plot_rdm(rdm, cluster_name="patterns", separate_clusters=False)
         ax.set_title(
             f"RDM - subj {subj_N:02} - pattern level \n {selected_chan_group} chans"
         )
@@ -2746,30 +3305,31 @@ def get_frp_rdms_all_subj(
         # plt.show()
         plt.close()
 
-    # * -------- Compute Group-Item Level RDM  --------
+    # * -------- Compute Group-Sequence Level RDM  --------
     group_average_rdm = np.nanmean(np.array(_group_average_rdm), axis=0)
     group_average_rdm = group_average_rdm[None, :]
     del _group_average_rdm
 
     group_patterns = _group_patterns[0]
-    del _group_patterns
+    group_item_ids = _group_item_ids[0]
+    del _group_patterns, _group_item_ids
 
     rdm = rsatoolbox.rdm.rdms.RDMs(
         dissimilarities=group_average_rdm,
         dissimilarity_measure=dissimilarity_metric,
         descriptors={},
         rdm_descriptors={"group_average_rdm": [selected_chan_group]},
-        pattern_descriptors={"patterns": group_patterns},
+        pattern_descriptors={"patterns": group_patterns, "item_ids": group_item_ids},
         # pattern_descriptors=subj_rdms[0].pattern_descriptors,
     )
 
-    fname = f"rdm-human-group_avg-item_lvl-{selected_chan_group}.hdf5"
+    fname = f"rdm-human-group_avg-sequence_lvl-{selected_chan_group}.hdf5"
     fpath = save_dir / fname
     rdm.save(fpath, file_type="hdf5", overwrite=True)
 
     # * Plot the RDM and save the figure
-    fig, ax = _plot_rdm(rdm, separate_clusters=True)
-    ax.set_title(f"RDM - Group Average - item level \n {selected_chan_group} chans")
+    fig, ax = plot_rdm(rdm, cluster_name="patterns", separate_clusters=True)
+    ax.set_title(f"RDM - Group Average - sequence level \n {selected_chan_group} chans")
     fig.savefig(fpath.with_suffix(".png"), dpi=300, bbox_inches="tight")
     # plt.show()
     plt.close()
@@ -2778,16 +3338,55 @@ def get_frp_rdms_all_subj(
     pattern_frps_avg = {k: np.nanmean(v, axis=0) for k, v in _pattern_frps_avg.items()}
     del _pattern_frps_avg
 
-    patterns = list(pattern_frps_avg.keys())
-    assert patterns == c.PATTERNS
+    assert list(pattern_frps_avg.keys()) == c.PATTERNS
 
     pattern_frps_avg = np.array([v for v in pattern_frps_avg.values()])
+
+    # * -------- Plot the group average FRPs --------
+    x_ticks = np.arange(0, pattern_frps_avg.shape[1], 200).astype(float)
+    x_ticklabels = np.round(x_ticks / c.EEG_SFREQ, 2)
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7), dpi=300)
+    ax1.plot(pattern_frps_avg.T)  # , alpha=0.8)
+    ax1.sharex(ax2)
+    # ax1.sharey(ax2)
+    ax1.set_title(f"Group Average FRPs - {selected_chan_group} chans")
+    ax1.legend(c.PATTERNS, bbox_to_anchor=(1.05, 1), loc="upper left")
+    ax1.grid(axis="both", ls="--")
+    ax1.set_xticks(x_ticks)
+    ax1.set_xticklabels(x_ticklabels)
+    ax1.set_ylabel("Amplitude (uV)")
+    ax1.set_xlabel("Time (s)")
+    line_colors = [l.get_color() for l in ax1.get_lines()]
+    for i, patt_frp in enumerate(pattern_frps_avg):
+        lat = patt_frp.argmin()
+        amp = patt_frp[lat]
+        ax2.scatter(lat, amp, marker="+", color=line_colors[i], label=c.PATTERNS[i])
+    ax2.set_title("Negative Peak Latency and Amplitude")
+    ax2.set_ylabel("Amplitude (uV)")
+    ax2.set_xlabel("Time (ms)")
+    ax2.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
+    ax2.grid(axis="both", ls="--")
+    ax2.set_xticks(x_ticks)
+    ax2.set_xticklabels(x_ticklabels)
+    fig.tight_layout()
+
+    fig.savefig(
+        save_dir / f"group_avg_FRPs-{selected_chan_group}.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    plt.close()
+    # * ---------------------------------------------------
 
     dataset = Dataset(
         measurements=pattern_frps_avg,
         descriptors={},
-        obs_descriptors={"patterns": patterns},
+        obs_descriptors={"patterns": c.PATTERNS},
     )
+    fname = f"dataset-human-group_avg-pattern_lvl-{selected_chan_group}.hdf5"
+    fpath = save_dir / fname
+    dataset.save(fpath, file_type="hdf5", overwrite=True)
 
     rdm = calc_rdm(dataset, method=dissimilarity_metric)
 
@@ -2796,39 +3395,11 @@ def get_frp_rdms_all_subj(
     rdm.save(fpath, file_type="hdf5", overwrite=True)
 
     # * Plot the RDM and save the figure
-    fig, ax = _plot_rdm(rdm, separate_clusters=False)
+    fig, ax = plot_rdm(rdm, cluster_name="patterns", separate_clusters=False)
     ax.set_title(f"RDM - Group Average - pattern level \n {selected_chan_group} chans")
     fig.savefig(fpath.with_suffix(".png"), dpi=300, bbox_inches="tight")
     # plt.show()
     plt.close()
-
-
-def rsa_between_subjects(rdm_files: List[Path], save_dir: Path, similarity_metric: str):
-    # ! TEMP
-    # similarity_metric = "cosine"
-    # ! TEMP
-
-    subj_rdms = [rsatoolbox.rdm.rdms.load_rdm(str(f)) for f in rdm_files]
-
-    similarity_matrix = np.zeros((len(subj_rdms), len(subj_rdms)))
-
-    for i, rdm1 in enumerate(subj_rdms):
-        for j, rdm2 in enumerate(subj_rdms):
-            similarity_matrix[i, j] = compare_rdm(
-                rdm1, rdm2, method=similarity_metric
-            ).item()
-
-    ticks = np.arange(1, len(subj_rdms), 2)
-    ticklabels = [f"{i + 1}" for i in ticks]
-    fig, ax = plt.subplots()
-    ax.imshow(similarity_matrix)
-    ax.set_title(f"Similarity Matrix - {chan_group}")
-    colorbar = ax.figure.colorbar(ax.imshow(similarity_matrix))
-    ax.set_xticks(ticks)
-    ax.set_xticklabels(ticklabels)
-    ax.set_yticks(ticks)
-    ax.set_yticklabels(ticklabels)
-    plt.show()
 
 
 def get_frp_amp_rdms_all_subj(
@@ -2853,7 +3424,6 @@ def get_frp_amp_rdms_all_subj(
     # data_dir = c.DATA_DIR
     # processed_data_dir = c.EXPORT_DIR / "analyzed/subj_lvl"
     # dissimilarity_metric = "euclidean"
-    # dissimilarity_metric = "corr"
     # selected_chan_group = "occipital"
     # chan_group = selected_chan_group
     # save_dir = (
@@ -2861,58 +3431,6 @@ def get_frp_amp_rdms_all_subj(
     #     / f"analyzed/RSA-FRP_AMP-{chan_group}-metric_{dissimilarity_metric}"
     # )
     # # # ! TEMP
-
-    def _plot_rdm(
-        rdm: rsatoolbox.rdm.rdms.RDMs,
-        cluster_name: str = "patterns",
-        separate_clusters: bool = False,
-    ):
-        dpi = 500
-        clusters = rdm.pattern_descriptors[cluster_name]
-
-        clusters_last_inds = (
-            pd.Series(clusters, name=cluster_name).value_counts().cumsum()
-        )
-
-        tick_labels = clusters_last_inds.index
-        tick_marks = np.array(
-            [0] + clusters_last_inds.values.tolist()
-        )  # , dtype=float)
-
-        rdm_array = rdm.get_matrices()[0]
-
-        # * Add rows and columns of nans to separate clusters
-        if separate_clusters:
-            for i, tick_mark in enumerate(tick_marks):
-                if i == 0:
-                    tick_marks[i:] += 1
-                else:
-                    tick_marks[i:] += 1
-                rdm_array = np.insert(rdm_array, tick_mark, np.nan, axis=0)
-                rdm_array = np.insert(rdm_array, tick_mark, np.nan, axis=1)
-
-            tick_marks -= 1
-            tick_marks_labels = np.array(tick_marks[:-1]) + np.diff(tick_marks) / 2
-        else:
-            tick_marks = tick_marks.astype(float)
-            tick_marks -= 0.5
-            tick_marks_labels = np.array(tick_marks[:-1]) + np.diff(tick_marks) / 2
-
-        fig, ax = plt.subplots(dpi=dpi)
-        im = ax.imshow(rdm_array)
-        # ax.set_title(f"subj {rdm.rdm_descriptors['subj_N'][0]} RDM")
-        ax.set_aspect("equal")
-        fig.colorbar(im, ax=ax)
-        ax.xaxis.set_minor_locator(ticker.FixedLocator(tick_marks))
-        ax.xaxis.set_major_locator(ticker.FixedLocator(tick_marks_labels))
-        ax.xaxis.set_major_formatter(ticker.FixedFormatter(tick_labels))
-        ax.tick_params(axis="x", labelrotation=90)
-
-        ax.yaxis.set_minor_locator(ticker.FixedLocator(tick_marks))
-        ax.yaxis.set_major_locator(ticker.FixedLocator(tick_marks_labels))
-        ax.yaxis.set_major_formatter(ticker.FixedFormatter(tick_labels))
-
-        return fig, ax
 
     save_dir.mkdir(exist_ok=True, parents=True)
 
@@ -2958,33 +3476,20 @@ def get_frp_amp_rdms_all_subj(
         if sess_missing_frps := [i for i, s in enumerate(sequence_frps) if s is None]:
             missing_frps.append((subj_N, sess_N, sess_missing_frps))
 
-        # data_shape = (
-        #     [s for s in sequence_frps if s is not None][0]
-        #     .get_data(picks=selected_chans)
-        #     .shape
-        # )
-
-        # empty_data = np.zeros(data_shape)
-        # empty_data[:] = np.nan
-
-        # sequence_frps = [
-        #     frp.get_data(picks=selected_chans) if frp is not None else empty_data
-        #     for frp in sequence_frps
-        # ]
-
         neg_peaks_lat_and_amp = [
-            get_neg_erp_peak(frp, (0.025, 0.2), selected_chans)
+            get_neg_erp_peak(frp, (0.02, 0.2), selected_chans)
             if frp is not None
             else (np.nan, np.nan)
             for frp in sequence_frps
         ]
 
-        # neg_peaks_amp = [amp for _, amp in neg_peaks_lat_and_amp]
+        neg_peaks_amp = [amp for _, amp in neg_peaks_lat_and_amp]
 
         subj_data[subj_N][sess_N] = [
             sess_item_ids,
             sess_patterns,
-            neg_peaks_lat_and_amp,  # neg_peaks_amp,  # sequence_frps,
+            neg_peaks_amp,
+            # neg_peaks_lat_and_amp,  # neg_peaks_amp,  # sequence_frps,
             # timepoints,
         ]
 
@@ -3002,7 +3507,7 @@ def get_frp_amp_rdms_all_subj(
     subj_rdms = []
     _group_average_rdm = []
     _group_patterns = []
-    _pattern_frps_avg = {p: [] for p in c.PATTERNS}
+    _pattern_neg_amp_avg = {p: [] for p in c.PATTERNS}
 
     for subj_N in sorted(subj_data.keys()):
         # * Making sure data is correctly sorted
@@ -3012,45 +3517,40 @@ def get_frp_amp_rdms_all_subj(
 
         subj_item_ids = np.concatenate([i for i, _, _ in sessions_data.values()])
         subj_patterns = np.concatenate([p for _, p, _ in sessions_data.values()])
-        subj_frps = np.concatenate([f for _, _, f in sessions_data.values()])
-        pattern_frps: dict = {p: [] for p in c.PATTERNS}
+        subj_peak_amps = np.concatenate([f for _, _, f in sessions_data.values()])
+        pattern_peak_amps: dict = {p: [] for p in c.PATTERNS}
 
-        # * Group FRPs by pattern
-        for i, frp in enumerate(subj_frps):
+        # * Group FRP negative peak amplitudes by pattern
+        for i, frp in enumerate(subj_peak_amps):
             pattern = subj_patterns[i]
-            pattern_frps[pattern].append(frp)
+            pattern_peak_amps[pattern].append(frp)
 
-        # * Compute average activity for each channel of each pattern FRP
-        pattern_frps_avg_by_chan: dict = {p: [] for p in c.PATTERNS}
-        for pattern, trials in pattern_frps.items():
-            avg_frp_by_chan = np.nanmean(np.stack(trials), axis=0)
-            pattern_frps_avg_by_chan[pattern] = avg_frp_by_chan
+        # * Compute average negative peak amplitude
+        pattern_neg_amp_avg: dict = {p: [] for p in c.PATTERNS}
+        for pattern, trials in pattern_peak_amps.items():
+            avg_neg_peak_amp = np.nanmean(np.stack(trials))
+            pattern_neg_amp_avg[pattern] = avg_neg_peak_amp
 
-        # * Compute overall average FRP for each pattern
-        pattern_frps_avg = {
-            p: np.nanmean(v, axis=0) for p, v in pattern_frps_avg_by_chan.items()
-        }
+        assert list(pattern_neg_amp_avg.keys()) == c.PATTERNS
 
-        assert list(pattern_frps.keys()) == c.PATTERNS
-        assert list(pattern_frps_avg_by_chan.keys()) == c.PATTERNS
-        assert list(pattern_frps_avg.keys()) == c.PATTERNS
-
-        [_pattern_frps_avg[patt].append(frp) for patt, frp in pattern_frps_avg.items()]
+        for patt, neg_amp in pattern_neg_amp_avg.items():
+            _pattern_neg_amp_avg[patt].append(neg_amp)
 
         # * -------- Deal with missing data --------
         # * Get the indices of the missing data
         inds_missing_data = [
-            i for i, subj_frp in enumerate(subj_frps) if np.all(np.isnan(subj_frp))
+            i for i, subj_frp in enumerate(subj_peak_amps) if np.all(np.isnan(subj_frp))
         ]
-        # np.all(np.isnan(subj_frps[inds_missing_data]))
+        # np.all(np.isnan(subj_peak_amps[inds_missing_data]))
 
         # * Replace missing data
-        overall_avg_frp = np.nanmean(subj_frps, axis=0)
+        overall_avg_neg_amp = np.nanmean(subj_peak_amps)
 
         for ind in inds_missing_data:
-            subj_frps[ind] = overall_avg_frp
+            subj_peak_amps[ind] = overall_avg_neg_amp
         #     # missing_data_pattern = subj_patterns[ind]
         #     # subj_frps[ind] = pattern_frps_avg_by_chan[missing_data_pattern]
+        # assert np.all(subj_peak_amps[inds_missing_data] == overall_avg_neg_amp)
 
         # * -------- Reorder the FRPs --------
         reordered_inds = reorder_item_ids(
@@ -3060,27 +3560,15 @@ def get_frp_amp_rdms_all_subj(
             new_order_df=c.ITEM_ID_SORT[["pattern", "item_id"]],
         )
 
-        subj_frps = subj_frps[reordered_inds]
+        subj_peak_amps = subj_peak_amps[reordered_inds]
         subj_patterns = subj_patterns[reordered_inds]
         subj_item_ids = subj_item_ids[reordered_inds]
 
-        # temporal_ds = ds = TemporalDataset(
-        #     measurements=subj_frps,
-        # )
-        # rdm_per_timestep = calc_rdm_movie(ds, method=dissimilarity_metric)
-        # # rdm_per_timestep = rdm.get_matrices()
-
-        # * Flatten FRPs across channels into a new array of shape (n_items, n_channels * n_timepoints)
-        # flattened_frps = subj_frps.reshape(subj_frps.shape[0], -1)
-
-        # * Compute the average FRP across all channels
-        # subj_frps = subj_frps.mean(axis=1)
-
-        # subj_frps = subj_frps[:, None]
-
         # * -------- Compute Subject-Item Level RDM  --------
+        subj_peak_amps = subj_peak_amps[:, None]
+
         dataset = Dataset(
-            measurements=subj_frps,
+            measurements=subj_peak_amps,
             descriptors={"subj_N": subj_N},
             obs_descriptors={"patterns": subj_patterns, "item_ids": subj_item_ids},
         )
@@ -3103,7 +3591,7 @@ def get_frp_amp_rdms_all_subj(
         rdm.save(fpath, file_type="hdf5", overwrite=True)
 
         # * Plot the RDM and save the figure
-        fig, ax = _plot_rdm(rdm, separate_clusters=True)
+        fig, ax = plot_rdm(rdm, cluster_name="patterns", separate_clusters=True)
         ax.set_title(
             f"RDM - subj {subj_N:02} - item level \n {selected_chan_group} chans"
         )
@@ -3116,11 +3604,12 @@ def get_frp_amp_rdms_all_subj(
         # pattern_frps_avg = np.array([v for v in pattern_frps_avg.values()])
 
         dataset = Dataset(
-            measurements=np.array([v for v in pattern_frps_avg.values()]),
+            measurements=np.array([v for v in pattern_neg_amp_avg.values()])[:, None],
             descriptors={"subj_N": subj_N},
             # channel_descriptors={"names": [f"average_of_{selected_chan_group}_chans"]},
-            obs_descriptors={"patterns": list(pattern_frps_avg.keys())},
+            obs_descriptors={"patterns": list(pattern_neg_amp_avg.keys())},
         )
+        # ! HERE
 
         # * Compute RDM
         rdm = calc_rdm(dataset, method=dissimilarity_metric)
@@ -3130,7 +3619,7 @@ def get_frp_amp_rdms_all_subj(
         rdm.save(fpath, file_type="hdf5", overwrite=True)
 
         # * Plot the RDM and save the figure
-        fig, ax = _plot_rdm(rdm, separate_clusters=False)
+        fig, ax = plot_rdm(rdm, cluster_name="patterns", separate_clusters=False)
         ax.set_title(
             f"RDM - subj {subj_N:02} - pattern level \n {selected_chan_group} chans"
         )
@@ -3160,23 +3649,25 @@ def get_frp_amp_rdms_all_subj(
     rdm.save(fpath, file_type="hdf5", overwrite=True)
 
     # * Plot the RDM and save the figure
-    fig, ax = _plot_rdm(rdm, separate_clusters=True)
+    fig, ax = plot_rdm(rdm, cluster_name="patterns", separate_clusters=True)
     ax.set_title(f"RDM - Group Average - item level \n {selected_chan_group} chans")
     fig.savefig(fpath.with_suffix(".png"), dpi=300, bbox_inches="tight")
     # plt.show()
     plt.close()
 
     # * -------- Compute Group-Pattern Level RDM  --------
-    pattern_frps_avg = {k: np.nanmean(v, axis=0) for k, v in _pattern_frps_avg.items()}
-    del _pattern_frps_avg
+    pattern_neg_amp_avg = {
+        k: np.nanmean(v, axis=0) for k, v in _pattern_neg_amp_avg.items()
+    }
+    del _pattern_neg_amp_avg
 
-    patterns = list(pattern_frps_avg.keys())
+    patterns = list(pattern_neg_amp_avg.keys())
     assert patterns == c.PATTERNS
 
-    pattern_frps_avg = np.array([v for v in pattern_frps_avg.values()])
+    pattern_neg_amp_avg = np.array([v for v in pattern_neg_amp_avg.values()])[:, None]
 
     dataset = Dataset(
-        measurements=pattern_frps_avg,
+        measurements=pattern_neg_amp_avg,
         descriptors={},
         obs_descriptors={"patterns": patterns},
     )
@@ -3188,11 +3679,39 @@ def get_frp_amp_rdms_all_subj(
     rdm.save(fpath, file_type="hdf5", overwrite=True)
 
     # * Plot the RDM and save the figure
-    fig, ax = _plot_rdm(rdm, separate_clusters=False)
+    fig, ax = plot_rdm(rdm, cluster_name="patterns", separate_clusters=False)
     ax.set_title(f"RDM - Group Average - pattern level \n {selected_chan_group} chans")
     fig.savefig(fpath.with_suffix(".png"), dpi=300, bbox_inches="tight")
-    # plt.show()
+    plt.show()
     plt.close()
+
+
+def rsa_between_subjects(rdm_files: List[Path], save_dir: Path, similarity_metric: str):
+    # ! TEMP
+    # similarity_metric = "cosine"
+    # ! TEMP
+
+    subj_rdms = [rsatoolbox.rdm.rdms.load_rdm(str(f)) for f in rdm_files]
+
+    similarity_matrix = np.zeros((len(subj_rdms), len(subj_rdms)))
+
+    for i, rdm1 in enumerate(subj_rdms):
+        for j, rdm2 in enumerate(subj_rdms):
+            similarity_matrix[i, j] = compare_rdms(
+                rdm1, rdm2, method=similarity_metric
+            ).item()
+
+    ticks = np.arange(1, len(subj_rdms), 2)
+    ticklabels = [f"{i + 1}" for i in ticks]
+    fig, ax = plt.subplots()
+    ax.imshow(similarity_matrix)
+    ax.set_title(f"Similarity Matrix - {chan_group}")
+    colorbar = ax.figure.colorbar(ax.imshow(similarity_matrix))
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticks(ticks)
+    ax.set_yticklabels(ticklabels)
+    plt.show()
 
 
 # * ----------------------------------------
@@ -3778,9 +4297,9 @@ def inspect_results():
     # * ################################################################################
     erps = {}
     erp_files = sorted(res_dir.glob("sub*/sess*/sess_frps.pkl"))
-    behav_files = sorted(DATA_DIR.glob("sub*/sess*/*behav.csv"))
+    behav_files = sorted(c.DATA_DIR.glob("sub*/sess*/*behav.csv"))
     gaze_info_files = list(res_dir.glob("sub*/sess*/gaze_info.pkl"))
-    behav_files = list(DATA_DIR.rglob("*behav.csv"))
+    behav_files = list(c.DATA_DIR.rglob("*behav.csv"))
 
     gaze_data = []
     behav_data = []
@@ -4415,11 +4934,11 @@ def inspect_results():
             rdm2 = all_subj_rdms[comb[1]]
 
             # * Fill the matrices symmetrically
-            pearson_corr = compare_rdms(rdm1, rdm2, method="pearson")
+            pearson_corr = compare_rdmss(rdm1, rdm2, method="pearson")
             df_pearson_corr_all_subj.loc[comb[0], comb[1]] = pearson_corr
             df_pearson_corr_all_subj.loc[comb[1], comb[0]] = pearson_corr
 
-            spearman_corr = compare_rdms(rdm1, rdm2, method="spearman")
+            spearman_corr = compare_rdmss(rdm1, rdm2, method="spearman")
             df_spearman_corr_all_subj.loc[comb[0], comb[1]] = spearman_corr
             df_spearman_corr_all_subj.loc[comb[1], comb[0]] = spearman_corr
 
@@ -4703,11 +5222,11 @@ def inspect_results2():
 
 
 def inspect_results3(data_dir: Path, res_dir: Path, selected_chans: List[str]):
-    # ! TEMP
-    data_dir = c.DATA_DIR
-    res_dir = c.EXPORT_DIR / "analyzed/subj_lvl"
-    selected_chans = c.EEG_CHAN_GROUPS["occipital"]
-    # ! TEMP
+    # # # ! TEMP
+    # data_dir = c.DATA_DIR
+    # res_dir = c.EXPORT_DIR / "analyzed/subj_lvl"
+    # selected_chans = c.EEG_CHAN_GROUPS["occipital"]
+    # # ! TEMP
 
     from functools import reduce
 
@@ -4849,7 +5368,34 @@ def inspect_results3(data_dir: Path, res_dir: Path, selected_chans: List[str]):
     display(summary_df_items)
     display(summary_df_patterns)
 
+    # * Adding pattern features
+    summary_df_items["patt_unique_el_count"] = 0
+
+    patt_info = {}
+    for patt in list(summary_df_items.pattern.unique()):
+        unique_els = list(set(patt))
+        count_unique = len(unique_els)
+        count_by_el = {el: patt.count(el) for el in unique_els}
+        patt_info[patt] = {"count_unique": count_unique, "count_by_el": count_by_el}
+        patt_inds = summary_df_items.query("pattern == @patt").index
+        summary_df_items.loc[patt_inds, "patt_unique_el_count"] = count_unique
+
     # * --------------- Correlations ---------------
+    # for subj_N in summary_df_items["subj_N"].unique():
+    #     subj_data = summary_df_items.query(f"subj_N=={subj_N}")
+    #     display(apply_df_style(subj_data.iloc[:, 2:].corr(), style=3, vmin=-1, vmax=1))
+
+    difficulty_data = Dataset(
+        summary_df_items.groupby("pattern")["difficulty"]
+        .mean()
+        # .sort_values()
+        .to_numpy()[:, None]
+    )
+
+    fig, ax = plt.subplots()
+    im = ax.imshow(calc_rdm(difficulty_data, "euclidean").get_matrices()[0])
+    fig.colorbar(im, ax=ax)
+
     summary_df_items_corr = summary_df_items.iloc[:, 2:].corr()
 
     summary_df_patterns_corr = summary_df_patterns.iloc[:, 2:].corr()
@@ -4874,6 +5420,77 @@ def inspect_results3(data_dir: Path, res_dir: Path, selected_chans: List[str]):
         table_conversion="matplotlib",
     )
 
+    # * ----------------------------------------
+    # *  Encode pattern_type as a categorical variable
+    summary_df_items["pattern"] = summary_df_items["pattern"].astype("category")
+    # * ----------------------------------------
+    # * ----------------------------------------
+    # * mixed-effects multinomial logistic regression model. This model predicts the
+    # * categorical outcome (pattern type) from FRP amplitude while controlling for the
+    # * number of fixations and including a random intercept for each subject.
+    # * ----------------------------------------
+    import bambi as bmb
+    import arviz as az
+    import pandas as pd
+
+    # Define the model formula:
+    # "pattern" is the categorical outcome.
+    # "frp_amplitude" and "num_fixations" are fixed effects.
+    # "(1|subject)" adds a random intercept for each subject.
+    model = bmb.Model(
+        "pattern ~ frp_amp + nb_fix + (1|subj_N)",
+        data=summary_df_items,
+        family="categorical",
+    )
+
+    # Fit the model. The 'draws' parameter controls the number of posterior samples.
+    results = model.fit(draws=500)
+
+    # Summarize the posterior estimates.
+    print(az.summary(results))
+    df_res = az.summary(results)
+    df_res.head(60)
+
+    # * ----------------------------------------
+
+    data = (
+        summary_df_items.groupby(["subj_N", "pattern"])["frp_amp"].mean().reset_index()
+    )
+
+    # * ANOVA with statsmodels
+    from statsmodels.stats.anova import AnovaRM
+
+    aov = AnovaRM(data=data, depvar="frp_amp", subject="subj_N", within=["pattern"])
+    anova_results = aov.fit()
+    print(anova_results)
+
+    # * ANOVA with pingouin
+    import pingouin as pg
+
+    # Example: using the same DataFrame 'df'
+    rm_anova = pg.rm_anova(
+        dv="frp_amp", within="pattern", subject="subj_N", data=data, detailed=True
+    )
+    display(rm_anova)
+
+    # * Linear mixed effects model
+    # Fit a Linear mixed-effects model with a random intercept for each participant.
+    model = smf.mixedlm(
+        "frp_amp ~ C(pattern)",
+        data=summary_df_items,
+        groups=summary_df_items["subj_N"],
+    )
+
+    mixedlm_results = model.fit()
+    print(mixedlm_results.summary())
+
+    # fig, ax = plt.subplots(figsize=(8, 6))
+    # sns.barplot(x="pattern", y="frp_amp", data=summary_df_items, errorbar="ci", ax=ax)
+    # ax.set_title("Mean FRP Amplitude by Pattern")
+    # plt.tight_layout()
+    # plt.show()
+
+    # * ----------------------------------------
     # * ----------------------------------------
 
     # * Reset index and ensure subj_N is a categorical variable
@@ -5602,6 +6219,63 @@ def get_frp_pca(frp_data):
     get_pca_rdms(group_avg_frps)
 
 
+def locate_unique_icons(sequences_file: Path, subj_behav: pd.DataFrame) -> Tuple:
+    # # ! TEMP
+    # sequences_file = WD.parent / "config/sequences/sessions-1_to_5-masked_idx(7).csv"
+    # behav_res = perf_analysis_all_subj(data_dir=c.DATA_DIR, patterns=c.PATTERNS)
+    # subj_behav = behav_res["raw_cleaned"].copy()
+    # subj_behav = subj_behav.query("subj_N == 1")
+    # # ! TEMP
+
+    # * Load file with sequences
+    sequences = pd.read_csv(sequences_file)
+
+    icon_cols = [f"figure{i}" for i in range(1, 9)] + [
+        f"choice{i}" for i in range(1, 5)
+    ]
+
+    cols_filter = ["item_id", "pattern"] + icon_cols
+
+    subj_behav = subj_behav.merge(
+        sequences[cols_filter], on=["item_id", "pattern"], how="outer"
+    )
+    unique_icons = tuple(sorted(set(subj_behav[icon_cols].values.flatten())))
+
+    icons_masks = {}
+    icons_locs = {}
+    for icon in unique_icons:
+        # * Getting mask of icon position
+        mask = np.zeros_like(subj_behav[icon_cols])
+        mask[np.where(subj_behav[icon_cols] == icon)] = 1
+        icons_masks[icon] = mask
+
+        # * Locate trial indices and column indices where icon is present
+        trial_inds = tuple(set(np.where(mask == 1)[0]))
+        positions_inds = [tuple(np.where(row == 1)[0]) for row in mask[trial_inds, :]]
+        icons_locs[icon] = tuple(zip(trial_inds, positions_inds))
+
+    # * filter trials where selected icon is present
+    # sel_icon = "hammer"
+    # subj_behav[icon_cols].iloc[[i[0] for i in icons_locs[sel_icon]]]
+    # subj_behav.iloc[[i[0] for i in icons_locs[sel_icon]]]
+
+    # * Show masked dataframe
+    # sel_icon = "hammer"
+    # arr = subj_behav[icon_cols].values
+    # arr[~icons_masks[sel_icon].astype(bool)] = "0"
+    # masked_df = pd.DataFrame(arr, columns=icon_cols)
+    # masked_df['item_id'] = subj_behav['item_id']
+    # masked_df['pattern'] = subj_behav['pattern']
+    # masked_df
+
+    # * Check total number of occurences per unique icon
+    # pd.Series(
+    #     {k: sum([len(v[1]) for v in values]) for k, values in icons_locs.items()}
+    # ).sort_values(ascending=False)
+
+    return icons_masks, icons_locs
+
+
 if __name__ == "__main__":
     # * ####################################################################################
     # * Preprocessing data, extracting features, and saving them
@@ -5649,13 +6323,18 @@ if __name__ == "__main__":
 
     # * ------- FRP RDMs -------
     # save_dir = EXPORT_DIR / "analyzed/group_lvl/RSA"
-    dissimilarity_metric = "correlation"
 
-    for chan_group in ["frontal", "occipital"]:
+    for chan_group in tqdm(["frontal", "occipital"]):
+        # * ------- RDMs for FRP time series -------
+        dissimilarity_metric = "correlation"
+
         save_dir = (
             c.EXPORT_DIR
             / f"analyzed/RSA-FRP-{chan_group}-metric_{dissimilarity_metric}"
         )
+        # # ! TEMP
+        # save_dir = save_dir.parent / f"{str(save_dir.name)}-300ms"
+        # # ! TEMP
 
         get_frp_rdms_all_subj(
             data_dir=c.DATA_DIR,
@@ -5663,8 +6342,26 @@ if __name__ == "__main__":
             save_dir=save_dir,
             dissimilarity_metric=dissimilarity_metric,
             selected_chan_group=chan_group,
+            time_window=(0.0, 0.6),
         )
 
+        # * ------- RDMs for FRP peak amplitude -------
+        dissimilarity_metric = "euclidean"
+
+        save_dir = (
+            c.EXPORT_DIR
+            / f"analyzed/RSA-FRP_AMP-{chan_group}-metric_{dissimilarity_metric}"
+        )
+
+        get_frp_amp_rdms_all_subj(
+            data_dir=c.DATA_DIR,
+            processed_data_dir=c.EXPORT_DIR / "analyzed/subj_lvl",
+            save_dir=save_dir,
+            dissimilarity_metric=dissimilarity_metric,
+            selected_chan_group=chan_group,
+        )
+
+    # * ------- RSA -------
     similarity_metric = "cosine"
     dissimilarity_metric = "correlation"
 

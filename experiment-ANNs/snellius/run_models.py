@@ -177,11 +177,14 @@ def run_model_and_extract_sublayer_output(
 
     df_prompts = pd.read_csv(prompt_file).iloc[:2]
 
+    # * Note:
+    # * temperature, top_p, and top_k are only active when do_sample=True
+    # * See: https://github.com/huggingface/transformers/issues/22405
     model_inference_kwargs = dict(
         torch_dtype="auto",
         do_sample=False,
         max_new_tokens=MAX_NEW_TOKENS,
-        temperature=1.0,
+        temperature=0.0,
         top_p=1.0,
         top_k=None,
         device_map="auto",
@@ -291,10 +294,6 @@ def run_model_and_extract_layer_token_output(
 
     df_prompts = pd.read_csv(prompt_file)
 
-    # !TEMP
-    df_prompts = df_prompts.iloc[182:]
-    # !TEMP
-
     # *  --- Load Model and Tokenizer ---
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -343,19 +342,26 @@ def run_model_and_extract_layer_token_output(
         input_tokens = np.array(tokenizer.convert_ids_to_tokens(input_ids[0]))
 
         # *  Decode and include special tokens
+
+        # * Note:
+        # * temperature, top_p, and top_k are only active when do_sample=True
+        # * See: https://github.com/huggingface/transformers/issues/22405
+
         output_ids = model.generate(
             input_ids,
             attention_mask=attention_mask,
             max_length=MAX_NEW_TOKENS,
             do_sample=False,
-            max_new_tokens=MAX_NEW_TOKENS,
-            temperature=1.0,
-            top_p=1.0,
-            top_k=None,
-            return_full_text=False,
+            temperature=0.0,
+            # top_p=1.0,
+            # top_k=None,
+            # max_new_tokens=MAX_NEW_TOKENS,
+            # return_full_text=False,
         )
 
-        output_tokens = tokenizer.decode(output_ids[0], skip_special_tokens=False)
+        output_tokens = tokenizer.convert_ids_to_tokens(
+            output_ids[0], skip_special_tokens=False
+        )
         output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
         row["response"] = output_text
@@ -395,7 +401,7 @@ def run_model_and_extract_layer_token_output(
             row.to_csv(responses_file, index=False, mode="a", header=False)
 
         # * Save the tokens
-        tokens = {"prompt": input_tokens, "response": output_tokens}
+        tokens = {"prompt": list(input_tokens), "response": output_tokens}
 
         with open(tokens_file, "a", encoding="utf-8") as f:
             json.dump(tokens, f, ensure_ascii=False)

@@ -20,8 +20,31 @@ class OpenRouter:
         self.request_count = 0
         self.reset_time = time.time()
 
-    def set_rate_limit(self, requests: int, interval: str):
-        self.rate_limit = {"requests": requests, "interval": interval}
+    def set_rate_limit(self, n_requests: int, interval: str):
+        self.rate_limit = {"requests": n_requests, "interval": interval}
+
+    def get_credits(self) -> dict:
+        """see: https://openrouter.ai/docs/api-reference/get-credits
+        Get the total credits purchased and used for the authenticated user
+
+        Returns:
+            dict: total credits purchased and used for the authenticated user
+        """
+
+        url = f"{self.base_url}/credits"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+
+        response = requests.get(url, headers=headers)
+
+        # * Check the status and print the response
+        if response.ok:
+            usage = response.json().get("data")
+            print(usage)
+        else:
+            print(
+                f"Request failed with status code {response.status_code}: {response.text}"
+            )
+        return usage
 
     def list_models(self):
         url = f"{self.base_url}/models"
