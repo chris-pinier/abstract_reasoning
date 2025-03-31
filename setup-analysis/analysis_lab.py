@@ -1149,7 +1149,6 @@ def preprocess_eeg_data(
         bad_chans = prepro_eeg.info["bads"]
 
         # TODO: automatically remove bad channels (e.g., amplitude cutoff)
-
         manually_set_bad_chans = c.ALL_BAD_CHANS.get(f"subj_{subj_N}", {}).get(
             f"sess_{sess_N}"
         )
@@ -1177,9 +1176,6 @@ def preprocess_eeg_data(
         # * Filter to remove power line noise
         prepro_eeg.notch_filter(freqs=np.arange(50, 251, 50), verbose="WARNING")
 
-        # * Bandpass Filter: 1-100 Hz
-        prepro_eeg.filter(l_freq=1, h_freq=100, verbose="WARNING")
-
         # * ############################################################################
         # * EOG artifact rejection using ICA
         # * ############################################################################
@@ -1191,6 +1187,11 @@ def preprocess_eeg_data(
             ica = mne.preprocessing.read_ica(ica_fpath)
 
         else:
+            eeg_filtered_for_ica = prepro_eeg.copy()
+
+            # * Bandpass Filter: 1-100 Hz
+            eeg_filtered_for_ica.filter(l_freq=1, h_freq=100, verbose="WARNING")
+
             # * Create a copy of the raw data to hihg-pass filter at 1Hz before ICA
             # * as recommended by MNE: https://mne.tools/stable/generated/mne.preprocessing.ICA.html
             # prepro_eeg_copy_for_ica = prepro_eeg.copy()
@@ -1207,7 +1208,7 @@ def preprocess_eeg_data(
                 verbose="WARNING",
             )
 
-            ica.fit(prepro_eeg, verbose="WARNING")
+            ica.fit(eeg_filtered_for_ica, verbose="WARNING")
 
             ica.save(ica_fpath, verbose="WARNING")
 
@@ -1233,6 +1234,9 @@ def preprocess_eeg_data(
 
         # * Apply ICA to raw data
         prepro_eeg = ica.apply(prepro_eeg, verbose="WARNING")
+
+        # * Bandpass Filter: 0.1-100 Hz
+        prepro_eeg.filter(l_freq=0.1, h_freq=100, verbose="WARNING")
 
         # * Interpolate bad channels and remove them from "bads" list in eeg info
         prepro_eeg = prepro_eeg.interpolate_bads(reset_bads=True)
@@ -6274,6 +6278,115 @@ def locate_unique_icons(sequences_file: Path, subj_behav: pd.DataFrame) -> Tuple
     # ).sort_values(ascending=False)
 
     return icons_masks, icons_locs
+
+
+def get_gaze_heatmaps_from_fixation_data():
+    """_summary_"""
+
+    def get_sess_heatmaps(subj_N, sess_N):
+        # ! TEMP
+        # subj_N = 4
+        # sess_N = 5
+        # # ! TEMP
+
+        try:
+            fixation_file = (
+                c.EXPORT_DIR
+                / f"analyzed/subj_lvl/subj_{subj_N:02}/sess_{sess_N:02}/gaze_info.pkl"
+            )
+
+            fixation_data = load_pickle(fixation_file)
+            behav_data = load_and_clean_behav_data(c.DATA_DIR, subj_N, sess_N)
+
+            heatmap_data = {p: [] for p in c.PATTERNS}
+            sequence_icon_inds = list(range(0, 8))
+
+            for trial in behav_data["trial_N"].unique():
+                pattern = behav_data.query("trial_N == @trial")["pattern"].iloc[0]
+
+                trial_data = fixation_data.query(
+                    f"trial_N == {trial} & target_ind in {sequence_icon_inds}"
+                )
+
+                trial_data = trial_data.merge(
+                    behav_data[["trial_N", "pattern", "item_id"]], on="trial_N"
+                )
+
+                sequence_heatmap = np.zeros(len(sequence_icon_inds))
+
+                if trial_data.shape[0] == 0:
+                    sequence_heatmap[:] = np.nan
+                else:
+                    target_inds = trial_data["target_ind"].values
+                    target_count = trial_data["count"].values
+                    sequence_heatmap[target_inds] = target_count
+
+                heatmap_data[pattern].append(sequence_heatmap)
+
+            heatmap_data = {p: np.array(h) for p, h in heatmap_data.items()}
+
+            avg_heatmaps = {p: np.nanmean(h, axis=0) for p, h in heatmap_data.items()}
+
+        except Exception as E:
+            print(f"ERROR ENCOUNTERED: subj_{subj_N:02} sess_{sess_N:02}")
+            print(E)
+            heatmap_data, avg_heatmaps = None, None
+
+        return heatmap_data, avg_heatmaps
+
+    def get_subj_heatmaps(subj_N):
+        # ! TEMP
+        # subj_N = 1
+        # ! TEMP
+
+        subj_dir = c.EXPORT_DIR / f"analyzed/subj_lvl/subj_{subj_N:02}"
+        sess_dirs = sorted(
+            [d for d in subj_dir.glob("*") if d.is_dir() and not d.name.startswith(".")]
+        )
+        sess_Ns = [int(d.name.split("_")[1]) for d in sess_dirs]
+
+        _subj_heatmaps = []
+        # _avg_subj_heatmaps = []
+        for sess_N in sess_Ns:
+            sess_heatmaps, avg_sess_heatmaps = get_sess_heatmaps(subj_N, sess_N)
+            _subj_heatmaps.append(sess_heatmaps)
+            # _avg_subj_heatmaps.append(avg_sess_heatmaps)
+
+        subj_heatmaps = {p: [] for p in c.PATTERNS}
+        # avg_subj_heatmaps = {p:[] for p in c.PATTERNS}
+
+        for p in c.PATTERNS:
+            for i in range(len(_subj_heatmaps)):
+                subj_heatmaps[p].append(_subj_heatmaps[i][p])
+                # avg_subj_heatmaps[p].append(_avg_subj_heatmaps[i][p])
+
+        subj_heatmaps = {p: np.concatenate(v) for p, v in subj_heatmaps.items()}
+        avg_subj_heatmaps = {p: np.nanmean(v, axis=0) for p, v in subj_heatmaps.items()}
+
+        return subj_heatmaps, avg_subj_heatmaps
+
+    def get_all_subjs_heatmaps():
+        res_dir = c.EXPORT_DIR / f"analyzed/subj_lvl"
+        subj_dirs = sorted(
+            [d for d in res_dir.glob("*") if d.is_dir() and not d.name.startswith(".")]
+        )
+        subj_Ns = [int(d.name.split("_")[1]) for d in subj_dirs]
+
+        subjects_heatmaps, avg_subjects_heatmaps = {}, {}
+        for subj_N in tqdm(subj_Ns):
+            subj_heatmaps, avg_subj_heatmaps = get_subj_heatmaps(subj_N)
+
+            subjects_heatmaps[subj_N] = subj_heatmaps
+            avg_subjects_heatmaps[subj_N] = avg_subj_heatmaps
+
+        return subjects_heatmaps, avg_subjects_heatmaps
+
+    subjects_heatmaps, avg_subjects_heatmaps = get_all_subjs_heatmaps()
+    avg_subjects_heatmaps[1][1]
+    # fig, ax = plt.subplots()
+    # ax.imshow(np.array(list(avg_heatmaps.values())))
+    # ax.set_yticks(range(8))
+    # ax.set_yticklabels(avg_heatmaps.keys())
 
 
 if __name__ == "__main__":
