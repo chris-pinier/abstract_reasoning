@@ -19,7 +19,7 @@ uv sync # Creates virtual environment
 # Change analysis_lab_config.py to local data locations
 uv run analysis_lab.py
 # Run interactive ipython if you want, uncomment the next line
-+uv run ipython
+# uv run ipython
 ```
 
 ## Using a conda virtual environment
