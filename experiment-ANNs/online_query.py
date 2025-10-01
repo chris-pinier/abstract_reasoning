@@ -6,12 +6,13 @@ from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 from typing import Union, Optional
 import traceback
-from online_providers import OpenRouter
 import time
 
 WD = Path(__file__).parent
-# os.chdir(WD)
+os.chdir(WD)
 assert WD == Path.cwd()
+
+from online_providers import OpenRouter
 
 STORAGE_LOCATION = Path("/Volumes/Realtek 1Tb/PhD Data/experiment1/data/ANNs")
 
@@ -98,6 +99,7 @@ def main(
     models_errors = []
 
     for model_id in pb_models:
+        # print(f"Running model: {model_id}")
         model_errors = []
 
         pb_models.set_description(model_id)
@@ -135,7 +137,15 @@ def main(
                         continue
 
                 resp = completion.choices[0].message.content
-                model_resps.append([row[identifier], row["masked_idx"], resp])
+                model_resps.append(
+                    [
+                        row[identifier],
+                        row["masked_idx"],
+                        row["pattern"],
+                        row["solution"],
+                        resp,
+                    ]
+                )
 
                 pb_prompts.update(1)
 
@@ -152,13 +162,16 @@ def main(
 
         finally:
             model_resps_df = pd.DataFrame(
-                model_resps, columns=[identifier, "masked_idx", "response"]
+                model_resps,
+                columns=[identifier, "masked_idx", "pattern", "solution", "response"],
             )
             model_resps_df.insert(0, "model_id", model_id)
             models_resps_df.append(model_resps_df)
 
             if save:
-                fpath = save_dir / f"{model_id_str}-responses.csv"
+                model_save_dir = save_dir / model_id_str
+                model_save_dir.mkdir()
+                fpath = model_save_dir / "responses.csv"
                 model_resps_df.to_csv(fpath, index=False)
 
             # if len(errors) > 0:
@@ -187,12 +200,30 @@ def run_model_on_missing_items(
     missing_items: Optional[pd.DataFrame] = None,
     identifier: str = "item_id",
 ):
+    # ! TEMP
+    # model_id = "deepseek/deepseek-r1"
+    # model_resps = pd.read_csv(
+    #     "/Volumes/Realtek 1Tb/PhD Data/experiment1/data/ANNs/online_queries/2025_03_21-14_25_10/deepseek--deepseek-r1-responses.csv"
+    # )
+    # prompts_file = WD / "sequence_prompts/sequence_prompts-masked_idx(7).csv"
+    # df_prompts = pd.read_csv(prompts_file)
+    # save_dir = EXPORT_DIR
+    # completion_parameters = dict(
+    #     temperature=0,
+    #     tool_choice=None,
+    #     seed=0,
+    #     # max_tokens=500,
+    # )
+    # missing_items = None
+    # identifier = "item_id"
+    # # ! TEMP
+
     save_dir = Path(save_dir)
 
     if missing_items is None:
         missing_items = get_missing_items(model_resps, df_prompts)
 
-    new_responses = main(
+    new_responses, errors = main(
         missing_items,
         [model_id],
         completion_parameters,
@@ -211,48 +242,92 @@ def run_model_on_missing_items(
     responses.sort_values("original_order", inplace=True)
 
     model_id_cleaned = clean_model_id(responses["model_id"][0])
-    responses.to_csv(
-        save_dir / f"{model_id_cleaned}-responses-COMPLETE.csv", index=False
-    )
+    fpath = save_dir / f"{model_id_cleaned}-responses-COMPLETE.csv"
+    responses.to_csv(fpath, index=False)
 
 
 if __name__ == "__main__":
+
+    def temp():
+        res_dir = Path(
+            "/Volumes/Realtek 1Tb/PhD Data/experiment1/data/ANNs/online_queries/01-complete/masked_idx(7)-proprietary"
+        )
+        
+        sequences = pd.read_csv(WD.parent / "config/sequences/sessions-1_to_5-masked_idx(7).csv")
+
+        res_files = [
+            f for f in res_dir.rglob("*responses.csv") if not f.name.startswith("._")
+        ]
+        res_df = {f.parent.name:pd.read_csv(f) for f in res_files}
+        
+        for ANN, df in res_df.items():
+            ANN = "openai--o4-mini-high" 
+            df = res_df[ANN]
+            print(df.shape)
+            temp = sequences.merge(df, on='item_id', how="left")
+            # na_count = temp['response'].isna()
+            temp[temp["response"].isna()]['item_id'].values
+
+
+        missing_items = []
+        df['clean_resp'] = df['response'].str.extract("Answer: (.+)")
+        df["correct"] = df["clean_resp"] == df["solution"].str.lower()
+        df["correct"].value_counts()
+        398/400
+
     models = [
+        # "anthropic/claude-opus-4",
+        # "anthropic/claude-sonnet-4",
+        # "anthropic/claude-4-sonnet-20250522",
+        # "google/gemini-2.5-pro-preview",
+        "openai/o4-mini-high",
+        # "openai/o3-mini-high",
+        # "x-ai/grok-3-mini-beta",
         # "anthropic/claude-3.5-sonnet",
         # "anthropic/claude-3.5-sonnet-20240620",
         # "deepseek/deepseek-chat",
+        # "deepseek/deepseek-chat-v3-0324",
+        # "deepseek/deepseek-r1",
         # "deepseek/deepseek-r1",
         # "deepseek/deepseek-r1-distill-llama-70b",
-        # "deepseek/deepseek-r1-distill-qwen-1.5b",
+        # "deepseek/deepseek-r1-distill-qwen-1.5b", # !
         # "deepseek/deepseek-r1-distill-qwen-14b",
-        # "deepseek/deepseek-r1-distill-qwen-32b",
-        "deepseek/deepseek-r1",
-        # # "google/gemini-2.0-flash-exp:free",
-        # # "google/gemini-2.0-flash-thinking-exp:free",
+        # "deepseek/deepseek-r1-distill-qwen-32b",  # !
+        # "google/gemini-2.0-flash-001",
+        # "google/gemini-2.0-flash-exp:free",
+        # "google/gemini-2.0-flash-thinking-exp:free",
         # "google/gemini-flash-1.5 ",
         # "google/gemma-2-27b-it",
         # "google/gemma-2-9b-it",
         # "meta-llama/llama-3.1-405b-instruct",
+        # "meta-llama/llama-3.1-8b-instruct",
+        # "meta-llama/llama-3.2-1b-instruct",
+        # "meta-llama/llama-3.1-70b-instruct",
+        # "meta-llama/llama-3.2-11b-vision-instruct",
+        # "meta-llama/llama-3.2-3b-instruct",
         # "meta-llama/llama-3.2-90b-vision-instruct",
-        # "meta-llama/llama-3.2-11b-vision-instruc"t
+        # "meta-llama/llama-3.3-70b-instruct",
         # "microsoft/phi-4",
+        # "microsoft/phi-4-multimodal-instruct",
+        # "minimax/minimax-01",
+        # "mistralai/mistral-small-24b-instruct-2501",
+        # "mistralai/mistral-small-24b-instruct-2501",
+        # "mistralai/mistral-small-3.1-24b-instruct",
         # "openai/gpt-4o-2024-11-20'",
         # "openai/gpt-4o-mini-2024-07-18",
         # "openai/o1-mini-2024-09-12",
         # "openai/o1-preview-2024-09-12",
-        # "qwen/qwen-14b-chat",
         # "openai/o3-mini",
-        # "meta-llama/llama-3.2-3b-instruct",
-        # "meta-llama/llama-3.3-70b-instruct",
-        # "minimax/minimax-01",
-        # "mistralai/mistral-small-24b-instruct-2501",
+        # "qwen/qwen-14b-chat",
         # "qwen/qwen-2.5-72b-instruct",
         # "qwen/qwen-2.5-7b-instruct",
+        # "qwen/qwq-32b",
         # "qwen/qwq-32b-preview",
     ]
 
     prompts_file = WD / "sequence_prompts/sequence_prompts-masked_idx(7).csv"
     df_prompts = pd.read_csv(prompts_file)
+    df_prompts = df_prompts.query("item_id in [215370, 308965]") 
 
     # df_prompts = df_prompts.sample(2)
 

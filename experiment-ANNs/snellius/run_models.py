@@ -163,6 +163,16 @@ def export_model_architecture_str(model_id, pipe=None):
 def run_model_and_extract_sublayer_output(
     model_id: str, prompt_file: Path, hook_layer_names: list
 ):
+    """Run the specified model on prompts in prompt file and extract activations from
+    layer module(s) specified in `hook_layer_names`
+    (e.g., 'model.layers.1.post_attention_layernorm')
+
+    Args:
+        model_id (str): _description_
+        prompt_file (Path): _description_
+        hook_layer_names (list): _description_
+    """
+
     timestamp = get_timestamp()
     model_id_str = model_id.replace("/", "--")
 
@@ -211,7 +221,7 @@ def run_model_and_extract_sublayer_output(
     tokenizer = pipe.tokenizer
 
     # * ---------------------------------------- *
-    hooked_layers_outputs, hook_handles = get_layer_activations(
+    hooked_layers_outputs, hook_handles = get_sublayer_outputs(
         pipe.model, hook_layer_names
     )
 
@@ -279,6 +289,14 @@ def run_model_and_extract_sublayer_output(
 def run_model_and_extract_layer_token_output(
     model_id: str, prompt_file: Path, hook_layer_names: list
 ):
+    """Run the specified model on prompts in prompt file and extract activations
+    of layers specified in `hook_layer_names` (e.g., 'model.layers.1')
+
+    Args:
+        model_id (str): _description_
+        prompt_file (Path): _description_
+        hook_layer_names (list): _description_
+    """
     timestamp = get_timestamp()
     model_id_str = model_id.replace("/", "--")
 
@@ -362,7 +380,15 @@ def run_model_and_extract_layer_token_output(
         output_tokens = tokenizer.convert_ids_to_tokens(
             output_ids[0], skip_special_tokens=False
         )
+
         output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+        if prompt not in output_text:
+            raise ValueError(
+                f"Prompt not found in output text. Prompt: {prompt}, Output: {output_text}"
+            )
+        else:
+            output_text = output_text.replace(prompt, "")
 
         row["response"] = output_text
         # tokens["prompt"].append(input_tokens)
