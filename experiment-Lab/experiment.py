@@ -610,6 +610,8 @@ def run_trial(
 
     record_event("trial_start", eeg_device, eye_tracker)
 
+    # * Wait 1 second after the `trial_start` event, this is in addition to the 
+    # * random intertrial_interval (`iti`)
     core.wait(1)
     win_flip(win)
 
