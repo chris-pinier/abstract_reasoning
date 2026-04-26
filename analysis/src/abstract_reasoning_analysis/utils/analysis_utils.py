@@ -2,17 +2,82 @@ import numpy as np
 import json
 from pprint import pprint
 from mne.preprocessing.eyetracking import read_eyelink_calibration
-from pathlib import Path
+from pathlib import Path, PosixPath
 from tqdm.auto import tqdm
 import pandas as pd
 from scipy.interpolate import interp1d
 from mne.channels import DigMontage
-from typing import List, Dict
+from typing import List, Dict, Union, Tuple, Optional, Literal, Any
 import contextlib
 import io
 import pickle
-from typing import Union, Tuple, Optional
 import tomllib
+import yaml
+import re
+from rsatoolbox.data import Dataset, TemporalDataset
+from rsatoolbox.rdm import RDMs, calc_rdm, calc_rdm_movie
+from datetime import datetime
+import matplotlib.pyplot as plt
+from mne.channels.montage import DigMontage
+from mne.io.edf.edf import RawEDF
+
+
+def clean_filename(filename: Union[str, PosixPath], case=None) -> str:
+    """
+    Cleans a filename by removing unwanted characters and replacing spaces with underscores.
+
+    Args:
+        filename (str): The original filename.
+
+    Returns:
+        str: The cleaned filename.
+    """
+    var_type = type(filename)
+
+    if var_type not in [str, PosixPath]:
+        raise TypeError(
+            f"filename must be of type str or pathlib.PosixPath, not {var_type}"
+        )
+
+    _filename = filename.stem if var_type == PosixPath else filename
+
+    # Replace unwanted characters with an empty string
+    pattern = r"\n|\s|\\|\/|\:|\*|\?|\<|\>|\||\!|\"|\'|\'\'"
+    cleaned_filename = re.sub(pattern, "_", _filename)
+
+    # Remove multiple underscores
+    cleaned_filename = re.sub(r"_{2,}", "_", cleaned_filename)
+
+    # Replace spaces with underscores
+    # cleaned_filename = cleaned_filename.replace(" ", "_")
+
+    if case == "lower":
+        cleaned_filename = cleaned_filename.lower()
+    elif case == "upper":
+        cleaned_filename = cleaned_filename.upper()
+
+    if var_type == PosixPath:
+        cleaned_filename = filename.with_stem(cleaned_filename)
+
+    return cleaned_filename
+
+
+def clean_ann_id(
+    id: str, reg_pat: str = "default", flags=re.IGNORECASE, str_case="title"
+):
+    allowed_str_case = ["lower", "upper", "title", None]
+    assert str_case in allowed_str_case, f"str_case must be one of {allowed_str_case}"
+
+    if reg_pat == "default":
+        # reg_pat = r".+\/|-(?:it|instruct)"
+        reg_pat = r".+(?:--|/)|-(?:it|instruct)"
+
+    new_id = re.sub(reg_pat, "", id, flags=flags)
+
+    if str_case is not None:
+        new_id = getattr(new_id, str_case)()
+
+    return new_id
 
 
 def save_pickle(data, filename):
@@ -256,20 +321,20 @@ def check_notes(data_dir: Path, show: bool = True) -> dict:
 
 
 def check_et_calibrations(
-    data_dir: Union[Path, str],
+    data_dir: Path | str, pat: str | None = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Check the eye tracker calibration files
-
-    Args:
-        data_dir (pathlib.Path, str): Path to the data directory
-
-    Returns:
-        tuple: A tuple containing the calibration DataFrame and the calibration stats DataFrame
-    """
+    """Check the eye tracker calibration files"""
 
     data_dir = Path(data_dir)
 
-    et_files = sorted(data_dir.rglob("*.asc"))
+    if pat is not None:
+        et_files = [
+            f
+            for f in data_dir.rglob("*.asc")
+            if re.search(pat, f.name) and not f.name.startswith(".")
+        ]
+    else:
+        et_files = [f for f in data_dir.rglob("*.asc") if not f.name.startswith(".")]
 
     cal_params = (
         "onset",
@@ -476,30 +541,33 @@ def check_ch_groups(
 
 
 def set_eeg_montage(
-    raw_eeg,
-    montage,
-    eog_chans,
-    non_eeg_chans,
-    verbose=True,
+    raw_eeg: RawEDF,
+    montage: DigMontage,
+    eog_chans: List[str] | None,
+    non_eeg_chans: List[str] | None = None,
+    verbose: bool = True,
 ):
-    raw_eeg.set_channel_types({ch: "eog" for ch in eog_chans})
+    # TODO: Messy function and usage, to be fixed
+    if eog_chans is not None:
+        raw_eeg.set_channel_types({ch: "eog" for ch in eog_chans})
 
     # montage = mne.channels.make_standard_montage("biosemi64")
+    non_eeg_chans = [] if non_eeg_chans is None else non_eeg_chans
 
     if other_chans := [
-        ch for ch in raw_eeg.ch_names if ch not in montage.ch_names + non_eeg_chans
+        ch for ch in raw_eeg.ch_names if ch not in montage.ch_names + eog_chans
     ]:
         if verbose:
-            print("WARNING: unknown channels detected. Dropping: ", other_chans)
+            print("WARNING: Dropping non-EEG and non-EOG channels: ", other_chans)
 
         raw_eeg.drop_channels(other_chans)
 
     raw_eeg.set_montage(montage)
 
 
-def read_file(file_path: Path):
+def read_file(file_path: Path) -> Any:
     """
-    Reads a file based on its extension.  Supports JSON, pickle, and CSV.
+    Reads a file based on its extension. Supports JSON, YAML, TOML, pickle, and CSV.
     Uses context managers for file handling.
 
     Args:
@@ -512,7 +580,7 @@ def read_file(file_path: Path):
         FileNotFoundError: If the file does not exist.
         TypeError: if the filepath is not a Path object
         ValueError: If the file extension is not supported.
-        Exception:  For any other errors during file reading (e.g., JSONDecodeError, pickle.UnpicklingError).
+        Exception:  For any other errors during file reading (e.g., JSONDecodeError, YAMLError, pickle.UnpicklingError).
     """
 
     if not isinstance(file_path, Path):
@@ -524,6 +592,8 @@ def read_file(file_path: Path):
     # * Use a dictionary to map extensions to reader functions
     file_readers = {
         ".json": lambda f: json.load(f),
+        ".yaml": lambda f: yaml.safe_load(f),
+        ".yml": lambda f: yaml.safe_load(f),
         ".toml": lambda f: tomllib.load(f),
         ".pickle": lambda f: pickle.load(f),
         ".pkl": lambda f: pickle.load(f),
@@ -540,7 +610,7 @@ def read_file(file_path: Path):
 
     binary_exts = [".toml", ".pickle", ".pkl"]
     try:
-        if ext in (".toml", ".json", ".pickle", ".pkl"):  # Context manager needed
+        if ext in (".toml", ".json", ".yaml", ".yml", ".pickle", ".pkl"):
             with open(file_path, "rb" if ext in binary_exts else "r") as file:
                 return reader_func(file)  # Pass the open file object
         elif ext == ".csv":
@@ -548,7 +618,12 @@ def read_file(file_path: Path):
         else:
             # This should never be reached
             raise ValueError(f"Unsupported file extension despite earlier check {ext}.")
-    except (json.JSONDecodeError, pickle.UnpicklingError, pd.errors.ParserError) as e:
+    except (
+        json.JSONDecodeError,
+        yaml.YAMLError,
+        pickle.UnpicklingError,
+        pd.errors.ParserError,
+    ) as e:
         raise Exception(f"Error reading file '{file_path}': {e}") from e
     except FileNotFoundError:
         raise  # Re-raise for consistency
@@ -639,26 +714,8 @@ def reorder_item_ids(
     return reordered_inds
 
 
-def get_reference_rdms(n_trials=400, n_trials_per_patt_type=50, n_patt_type=8):
-    arr_item_lvl = np.ones((n_trials, n_trials))
-
-    inds = np.arange(0, n_trials + 1, n_trials_per_patt_type)
-    inds = list(zip(inds[:-1], inds[1:]))
-    inds = [slice(*i) for i in inds]
-
-    for ind_slice in inds:
-        arr_item_lvl[ind_slice, ind_slice] = 0
-
-    arr_pattern_lvl = np.ones((n_patt_type, n_patt_type))
-
-    inds = np.arange(0, n_patt_type + 1, 1)
-    inds = list(zip(inds[:-1], inds[1:]))
-    inds = [slice(*i) for i in inds]
-
-    for ind_slice in inds:
-        arr_pattern_lvl[ind_slice, ind_slice] = 0
-
-    return arr_item_lvl, arr_pattern_lvl
+def get_timestamp(fmt: str = "%Y%m%d_%H%M%S"):
+    return datetime.now().strftime(fmt)
 
 
 def email_sender(email: str, password: str, on: bool = True):
@@ -678,7 +735,6 @@ def email_sender(email: str, password: str, on: bool = True):
     import ssl
     import smtplib
     from dataclasses import dataclass
-    from typing import List
 
     @dataclass
     class EmailSender:
@@ -717,3 +773,51 @@ def email_sender(email: str, password: str, on: bool = True):
                 self.smtp.sendmail(self.email, receiver, em.as_string())
 
     return EmailSender(email, password, on)
+
+
+def show_seq_img(item_id: int, seq_img_dir: Path):
+    # seq_img_dir = WD.parent / "config/sequence_images"
+
+    img_path = seq_img_dir / f"sequence_{item_id}.png"
+
+    if not img_path.exists():
+        raise ValueError(f"The file path provided doesn't exist: {img_path}")
+
+    fig, ax = plt.subplots()
+    ax.imshow(plt.imread(str(img_path)))
+    plt.axis("off")
+    plt.show()
+    plt.close(fig)
+
+
+def list_contents(
+    directory: Path | str,
+    incl: Literal["file", "folder", "both"] = "both",
+    recurs: bool = True,
+    hidden: bool = False,
+    reg: str | None = None,
+) -> list[Path]:
+    directory = Path(directory)
+
+    if incl not in {"file", "folder", "both"}:
+        raise ValueError("include must be 'file', 'folder', or 'both'")
+
+    paths = directory.rglob("*") if recurs else directory.glob("*")
+
+    if not hidden:
+        paths = (p for p in paths if not p.name.startswith("."))
+
+    if reg is not None:
+        regex = re.compile(reg)
+        reg_filter = lambda p: regex.search(str(p))
+    else:
+        reg_filter = lambda p: True
+
+    if incl == "file":
+        paths = (p for p in paths if p.is_file() and reg_filter(p))
+    elif incl == "folder":
+        paths = (p for p in paths if p.is_dir() and reg_filter(p))
+    else:
+        paths = (p for p in paths if reg_filter(p))
+
+    return list(paths)

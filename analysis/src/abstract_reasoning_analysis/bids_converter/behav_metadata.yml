@@ -1,0 +1,82 @@
+---
+# Behavioral column metadata for task-level BIDS sidecars.
+# Source columns are written by experiment-Lab/experiment.py.
+
+subj_id:
+  Description: Zero-padded participant identifier recorded at session start.
+
+trial_type:
+  Description: Trial category.
+  Levels:
+    experiment: Main experimental trial.
+    practice: Practice trial.
+
+item_id:
+  Description: Unique identifier of the abstract reasoning item presented on this trial.
+
+trial_onset_time:
+  Description: Time when the trial_start event was sent, measured from the experiment global clock.
+  Units: s
+
+series_end_time:
+  Description: Time when sequential presentation ("encoding phase") of the item sequence and answer choices ended, measured from the experiment global clock.
+  Units: s
+
+choice_onset_time:
+  Description: Time when all stimuli were displayed together and the response window began, measured from the experiment global clock.
+  Units: s
+
+rt:
+  Description: Response time relative to choice_onset_time. The value is "timeout" when no key was pressed before the response window closed.
+  Units: s
+
+rt_global:
+  Description: Experiment global-clock time when the response collection ended. For timed-out trials, this is the end of the response window.
+  Units: s
+
+choice_key:
+  Description: Keyboard key recorded during the response window.
+  Levels:
+    a: Leftmost valid response key, mapped to the leftmost displayed answer choice.
+    x: Second-leftmost valid response key, mapped to the second-leftmost displayed answer choice.
+    m: Second-rightmost valid response key, mapped to the second-rightmost displayed answer choice.
+    l: Rightmost valid response key, mapped to the rightmost displayed answer choice.
+    timeout: No key was pressed before the response window closed.
+    invalid: A key outside the set of allowed keys (a, x, m, l, escape) was pressed.
+    escape: Escape key was pressed to trigger the abort dialog.
+
+solution_key:
+  Description: Keyboard key that was mapped to the correct answer choice on this trial.
+  Levels:
+    a: Leftmost valid response key, mapped to the leftmost displayed answer choice.
+    x: Second-leftmost valid response key, mapped to the second-leftmost displayed answer choice.
+    m: Second-rightmost valid response key, mapped to the second-rightmost displayed answer choice.
+    l: Rightmost valid response key, mapped to the rightmost displayed answer choice.
+
+choice:
+  Description: Participant's selected stimulus label, or a non-choice status for trials without a valid answer.
+  Levels:
+    timeout: No key was pressed before the response window closed.
+    invalid: A key outside the set of allowed keys (a, x, m, l, escape) was pressed.
+    abort-stop: Participant chose to abort the experiment after pressing escape.
+    abort-continue: Participant chose to continue the experiment after pressing escape.
+
+solution:
+  Description: Correct stimulus label for the missing item in the abstract reasoning sequence.
+
+correct:
+  Description: Trial accuracy. Valid responses are recorded as boolean values; invalid, timed-out, and aborted trials are marked as "invalid".
+  Levels:
+    "True": The selected answer matched the correct solution.
+    "False": The selected answer did not match the correct solution.
+    invalid: No valid accuracy score is available for this trial.
+
+pattern:
+  Description: Abstract structure of the item sequence, encoded as a string pattern such as AAABAAAB.
+
+blockN:
+  Description: Zero-based block number within the session. Practice trials use -1.
+
+iti:
+  Description: Randomly sampled intertrial interval shown before trial onset.
+  Units: s

@@ -4,15 +4,19 @@ logs/*
 draft/*
 drafts/*
 jobs/*
+temp/*
+
 eyetracking/
 archive/
 *credentials*
 credentials.toml
 TODO.txt
 
+mypi.ini
+
 # ! ######## Temporary ########
 analysis_new.py
-
+analysis/openneuro_debug/*
 
 # * ######## global config ########
 config/draft/*
@@ -65,13 +69,11 @@ experiment-Online/results/*
 experiment-Online/logs/*
 !online/logs/.gitkeep
 
-# * ######## Setup-anlysis ########
-setup-analysis/results/*
-!setup-analysis/results/.gitkeep
-
-setup-analysis/draft/*
-
+# * ######## Analysis ########
+analysis/results/*
+analysis/draft/*
 analysis_old/*
+
 # * ###### Other ########
 # .vscode
 .secrets

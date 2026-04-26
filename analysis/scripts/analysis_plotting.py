@@ -8,7 +8,6 @@ import mplcursors
 import numpy as np
 import plotly.graph_objects as go
 import plotly.subplots as ps
-from analysis_utils import normalize, get_trial_info
 from PIL import Image
 import subprocess
 from pathlib import Path
@@ -16,8 +15,8 @@ from matplotlib.figure import Figure
 from matplotlib.axes._axes import Axes
 import pandas as pd
 import re
-from analysis_utils import get_trial_info
 from rsatoolbox.rdm.rdms import RDMs
+from utils.analysis_utils import normalize, get_trial_info, get_trial_info
 
 
 def plot_sequence_img(
@@ -79,8 +78,14 @@ def plot_sequence_img(
 
 
 def plot_sequence_video(
-    type, icon_images, stim_pos, stim_order, screen_resolution, save_dir
+    icon_images: Dict[str, str],
+    stim_pos: List[Tuple[str, Tuple[float, float, float, float]]],
+    stim_order: List[int],
+    screen_resolution: Tuple[int, int],
+    save_dir: Path,
 ):
+    # ! TEMP
+    # ! TEMP
     # save_dir = wd / "sequence_video"
     # if save_dir.exists():
     #     shutil.rmtree(save_dir)
@@ -807,7 +812,7 @@ def plot_matrix(
 
     # * Create the heatmap
     # cax = ax.matshow(m, cmap=cmap)
-    cax = ax.imshow(m, cmap=cmap)
+    cax = ax.imshow(m, cmap=cmap, interpolation="none")
 
     # * Add the colorbar
     if cbar:
@@ -968,11 +973,14 @@ def custom_plot_montage(
     show_names: bool = True,
     show_legend: bool = True,
     show: bool = True,
+    subplots_params: dict = {},
 ):
     # ! TEMP
     # ch_groups = ch_groups1.copy()
     # group_colors = ch_groups1_colors.copy()
     # ! TEMP
+    if subplots_params is None:
+        subplots_params = {"figsize": (10, 10), "dpi": 300}
 
     # * Ensure channel names in ch_groups are non-overlapping
     all_chans = [ch for group in ch_groups.values() for ch in group]
@@ -989,9 +997,14 @@ def custom_plot_montage(
     }
     ch_colors = list(ch_colors.values())
 
-    # * Plot initially to capture the ax.lines and ax.texts (ch names)
+    # * Initial plot to capture the ax.lines and ax.texts (ch names)
+    # if ax is not None:
+    #     montage.plot(show_names=True, show=False, axes=ax)
+    # else:
+
     fig = montage.plot(show_names=True, show=False)
     ax = fig.get_axes()[0]
+
     plt.close()
     [group for group, chans in ch_groups.items() if "Cz" in chans]
 
@@ -1002,7 +1015,7 @@ def custom_plot_montage(
     chan_names = [i for i in ax.texts if i.get_text() in montage.ch_names]
 
     # * Now, replicate the plot, including the head, nose, and ears from `ax.lines`
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax = plt.subplots(**subplots_params)
 
     # * Plot the head, nose, and ears using the lines stored in `ax.lines`
     for line_data in head_lines:
@@ -1676,19 +1689,32 @@ def plot_rdm(
     rdm: RDMs,
     cluster_name: str,
     separate_clusters: bool = False,
-    title=None,
+    title: Optional[str] = None,
     fig_params=None,
-) -> Tuple[Figure, Axes]:
-    """_summary_
+    get_sep_mask=False,
+) -> Tuple[Figure, Axes] | Tuple[Figure, Axes, np.ndarray]:
+    """# TODO: finish doc
 
     Args:
         rdm (RDMs): RDM object from rsatoolbox
         cluster_name (str): name of the RDM's obs_descriptor used to group the data.
         separate_clusters (bool, optional): add a separation between every cluster. Defaults to False.
-
+        title (_type_, optional): _description_. Defaults to None.
+        fig_params (_type_, optional): _description_. Defaults to None.
+        get_sep_mask (bool, optional): _description_. Defaults to False.
     Returns:
-        Tuple[Figure, Axes]: _description_
+        Tuple[Figure, Axes] | Tuple[Figure, Axes, np.ndarray]: _description_
     """
+
+    dissim_labels = {
+        "squared euclidean": "Euclidean Distance",
+        "correlation": "Correlation Distance",
+        "mahalanobis": "Mahalanobis Distance",
+        "crossnobis": "Crossnobis dissimilarity",
+        "poisson": "Poisson Symmetrized KL-divergence",
+        "poisson_cv": "Cross-validated Poisson KL-divergence",
+    }
+
     if fig_params is None:
         fig_params = {"dpi": 500}
 
@@ -1724,7 +1750,7 @@ def plot_rdm(
         ax.set_title(title)
 
     ax.set_aspect("equal")
-    fig.colorbar(im, ax=ax)
+    fig.colorbar(im, ax=ax, label=f"{dissim_labels.get(rdm.dissimilarity_measure)}")
     ax.xaxis.set_minor_locator(ticker.FixedLocator(tick_marks))
     ax.xaxis.set_major_locator(ticker.FixedLocator(tick_marks_labels))
     ax.xaxis.set_major_formatter(ticker.FixedFormatter(tick_labels))
@@ -1734,7 +1760,16 @@ def plot_rdm(
     ax.yaxis.set_major_locator(ticker.FixedLocator(tick_marks_labels))
     ax.yaxis.set_major_formatter(ticker.FixedFormatter(tick_labels))
 
-    return fig, ax
+    if get_sep_mask:
+        sep_inds = np.where(np.all(np.isnan(rdm_array), axis=1) == True)
+        sep_mask = np.ones_like(rdm_array)
+        sep_mask[sep_inds] = 0
+        # sep_inds = list(set(sep_inds))
+        # sep_inds = [list(set(inds)) for inds in sep_inds]
+        # row_inds, col_inds = sep_inds
+        return fig, ax, sep_mask  # (row_inds, col_inds)
+    else:
+        return fig, ax
 
 
 if __name__ == "__main__":

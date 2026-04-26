@@ -1,0 +1,10 @@
+BIDS_VERSION = "1.11.1"
+DATASET_NAME = "Abstract pattern completion EEG and eye-tracking dataset"
+OPENNEURO_BIDSIGNORE_PATTERNS = (
+    "# eye2bids physiologic event files are BIDS 1.11+, but the OpenNeuro validator may not yet accept them.",
+    "*_physioevents.tsv",
+    "*_physioevents.tsv.gz",
+    "*_physioevents.json",
+    "# eye2bids continuous physio files must remain compressed in BIDS.",
+    "*_physio.tsv",
+)
