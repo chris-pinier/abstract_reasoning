@@ -1,0 +1,8 @@
+{
+    "exclude": [
+      "**/.venv/**",
+      "**/results/**",
+      "**/write_up/**",
+      "**/data/**",
+    ]
+}

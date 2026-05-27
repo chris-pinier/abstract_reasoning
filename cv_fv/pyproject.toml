@@ -1,0 +1,18 @@
+[project]
+name = "asso-analo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel>=6.30.1",
+    "manim",
+    "matplotlib>=3.10.6",
+    "nnsight>=0.4.6",
+    "nnterp>=0.4.9",
+    "openai>=2.15.0",
+    "scipy>=1.16.3",
+    "seaborn>=0.13.2",
+    "torch>=2.8.0",
+    "transformer-lens>=2.16.1",
+]
