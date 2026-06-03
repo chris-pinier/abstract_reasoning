@@ -11,6 +11,7 @@ archive/
 *credentials*
 credentials.toml
 TODO.txt
+.temp/
 
 mypi.ini
 

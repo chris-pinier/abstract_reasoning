@@ -68,6 +68,7 @@ dependencies = [
     "html5lib>=1.1",
     "beautifulsoup4>=4.13.4",
     "openneuro-py>=2026.4.1",
+    "marimo>=0.23.8",
 ]
 
 [tool.uv.sources]
