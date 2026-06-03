@@ -6,20 +6,25 @@
 # and fill the fields below according to the data types given in the specification.
 
 # REQUIRED, fill according to BIDS specification (!the converter will not run successfully if you leave this empty!):
-Units: pixel
+CoordinateUnits: pixel
 SampleCoordinateSystem: gaze-on-screen
 EnvironmentCoordinates: top-left
+ScreenOrigin: [top, left]
+# LG 27GL850 active display area, [width, height] in meters.
+ScreenSize: [0.596736, 0.335664]
 
 # Recommended (leave empty if not available but put information you want to share with your dataset here!):
-SoftwareVersion: EYELINK II CL v5.50 Jun 16 2022 (EyeLink 1000 Plus)
+ManufacturersModelName: EyeLink 1000 Plus
+SoftwareVersions: EYELINK II CL v5.50 Jun 16 2022
 ScreenAOIDefinition:
 EyeCameraSettings:
 EyeTrackerDistance:
 FeatureDetectionSettings:
 GazeMappingSettings:
 RawDataFilters:
+EyeTrackingMethod: P-CR
 InstitutionName: 
 InstitutionAddress: 
 ScreenDistance: 
 ScreenRefreshRate: 120
-ScreenSize: 
+ScreenResolution: [2560, 1440]

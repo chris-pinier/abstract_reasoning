@@ -27,7 +27,7 @@ choice_onset_time:
   Units: s
 
 rt:
-  Description: Response time relative to choice_onset_time. The value is "timeout" when no key was pressed before the response window closed.
+  Description: Response time relative to choice_onset_time. Timed-out or otherwise unavailable responses are encoded as n/a.
   Units: s
 
 rt_global:
@@ -55,11 +55,6 @@ solution_key:
 
 choice:
   Description: Participant's selected stimulus label, or a non-choice status for trials without a valid answer.
-  Levels:
-    timeout: No key was pressed before the response window closed.
-    invalid: A key outside the set of allowed keys (a, x, m, l, escape) was pressed.
-    abort-stop: Participant chose to abort the experiment after pressing escape.
-    abort-continue: Participant chose to continue the experiment after pressing escape.
 
 solution:
   Description: Correct stimulus label for the missing item in the abstract reasoning sequence.

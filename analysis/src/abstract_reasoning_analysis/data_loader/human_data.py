@@ -23,6 +23,7 @@ import rsatoolbox
 from datetime import timedelta
 import textwrap
 from box import Box
+from loguru import logger
 # from icecream import ic
 # from pprint import pprint
 
@@ -30,6 +31,7 @@ from box import Box
 # * RELATIVE IMPORTS
 # * ########################################
 from abstract_reasoning_analysis.analysis_config import Config as c
+from abstract_reasoning_analysis.paths import CONFIG_DIR
 from abstract_reasoning_analysis.utils.custom_type_hints import DATA_FMTS
 
 from abstract_reasoning_analysis.analysis_plotting import (
@@ -219,6 +221,14 @@ class HumanSessData(HumanDataClass):
 
         return physio_columns
 
+    @staticmethod
+    def _event_desc_from_mne_events(events: np.ndarray) -> dict[int, str]:
+        observed_values = sorted({int(value) for value in events[:, 2]})
+        return {
+            value: c.VALID_EVENTS_INV.get(value, f"trigger_{value}")
+            for value in observed_values
+        }
+
     # * ########################################
     # * Get Raw Data
     # * ########################################
@@ -385,24 +395,48 @@ class HumanSessData(HumanDataClass):
             events_meta = json.load(f)
         ch_names = events_meta["Columns"]
 
-        # * Unlike continuous physio, BIDS event files DO have a header row
-        events_df = pd.read_csv(events_tsv, sep="\t", header=None, names=ch_names)
+        # * Unlike continuous physio, BIDS event files should have a header row.
+        # * Older local conversions may be headerless, so fall back to sidecar columns.
+        events_df = pd.read_csv(events_tsv, sep="\t")
+        if not set(ch_names).issubset(events_df.columns):
+            events_df = pd.read_csv(events_tsv, sep="\t", header=None, names=ch_names)
+
+        for col in ("onset", "duration"):
+            if col not in events_df.columns:
+                raise ValueError(f"Missing required eye-tracking event column: {col}")
+
+        events_df["onset"] = pd.to_numeric(events_df["onset"], errors="coerce")
+        events_df["duration"] = pd.to_numeric(
+            events_df["duration"], errors="coerce"
+        ).fillna(0)
+        events_df.dropna(subset=["onset"], inplace=True)
+        events_df.reset_index(drop=True, inplace=True)
+
+        if events_df.empty:
+            raw.set_annotations(mne.Annotations([], [], []))
+            raw.filenames = [physio_tsv]
+            return raw
+
         events_df["onset"] = (events_df["onset"] - events_df["onset"].iloc[0]) / 1000
         events_df["duration"] /= 1000
 
-        eye_events = events_df.query(f"~trial_type.isna()")
-        exp_events = events_df.query(f"~message.isna()")
+        for col in ("trial_type", "message"):
+            if col not in events_df.columns:
+                events_df[col] = pd.NA
+
+        eye_events = events_df[events_df["trial_type"].notna()]
+        exp_events = events_df[events_df["message"].notna()]
 
         eye_annotations = mne.Annotations(
             onset=eye_events["onset"].values,
             duration=eye_events["duration"].values,
-            description=eye_events["trial_type"].values,
+            description=eye_events["trial_type"].astype(str).values,
         )
 
         exp_annotations = mne.Annotations(
             onset=exp_events["onset"].values,
-            duration=exp_events["duration"],
-            description=exp_events["message"].values,
+            duration=exp_events["duration"].values,
+            description=exp_events["message"].astype(str).values,
         )
 
         annotations = eye_annotations + exp_annotations
@@ -1021,15 +1055,15 @@ class HumanSessData(HumanDataClass):
         behav_data.drop(columns=cols_to_drop, inplace=True)
 
         # * Identify timeout trials and mark them as incorrect
-        timeout_trials = behav_data.query("rt=='timeout'")
-        behav_data.loc[timeout_trials.index, "correct"] = False
-        behav_data.loc[timeout_trials.index, "rt"] = np.nan
+        behav_data["correct"] = behav_data["correct"].astype(object)
+        timeout_trials = behav_data["choice_key"].eq("timeout")
+        behav_data["rt"] = pd.to_numeric(behav_data["rt"], errors="coerce")
+        behav_data.loc[timeout_trials, "correct"] = False
+        behav_data.loc[timeout_trials, "rt"] = np.nan
         # behav_data.loc[timeout_trials.index, ['choice_key', "choice"]] = "invalid"
 
-        behav_data["rt"] = behav_data["rt"].astype(float)
         behav_data["correct"] = (
             behav_data["correct"]
-            .infer_objects(copy=False)
             .replace({"invalid": False, "True": True, "False": False})
             .astype(bool)
         )
@@ -1041,7 +1075,7 @@ class HumanSessData(HumanDataClass):
         ), "Error with cleaning of 'Correct' column"
 
         # * ----------------------------------------
-        sequences_file = WD.parent / f"config/sequences/session_{sess_N}.csv"
+        sequences_file = CONFIG_DIR / f"sequences/session_{sess_N}.csv"
 
         sequences = pd.read_csv(
             sequences_file, dtype={"choice_order": str, "seq_order": str}
@@ -1300,20 +1334,30 @@ class HumanSessData(HumanDataClass):
     @staticmethod
     def annotate_eeg_from_events(data: mne.io.Raw, verbose: str = "WARNING"):
         # * Detecting events
-        events = mne.find_events(
-            data,
-            min_duration=0,
-            initial_event=False,
-            shortest_event=1,
-            uint_cast=True,
-            verbose=verbose,
-        )
+        try:
+            events = mne.find_events(
+                data,
+                min_duration=0,
+                initial_event=False,
+                shortest_event=1,
+                uint_cast=True,
+                verbose=verbose,
+            )
+        except ValueError as exc:
+            if "Could not find any of the events" not in str(exc):
+                raise
+            data.set_annotations(mne.Annotations([], [], []), verbose=verbose)
+            return
+
+        if len(events) == 0:
+            data.set_annotations(mne.Annotations([], [], []), verbose=verbose)
+            return
 
         # * Get annotations from events and add them to the raw data
         annotations = mne.annotations_from_events(
             events,
             data.info["sfreq"],
-            event_desc=c.VALID_EVENTS_INV,
+            event_desc=HumanSessData._event_desc_from_mne_events(events),
             verbose=verbose,
         )
 
@@ -1826,6 +1870,23 @@ class HumanSessData(HumanDataClass):
             raw_eeg, c.VALID_EVENTS, verbose="WARNING"
         )
 
+        if eeg_events.size == 0:
+            warning_msg = "Error with EEG events: no valid EEG events found."
+            if incomplete == "error":
+                raise ValueError(warning_msg)
+            elif incomplete == "skip":
+                print(warning_msg)
+                return [None] * 4
+            elif incomplete == "allow":
+                print(warning_msg)
+                raw_behav["choice_key_eeg"] = pd.NA
+                raw_behav["same"] = False
+                eeg_trial_bounds = np.empty((0, 2), dtype=int)
+                eeg_events_df = pd.DataFrame(
+                    columns=["sample_nb", "event_id", "trial_id"]
+                )
+                return iter(()), eeg_trial_bounds, eeg_events, eeg_events_df
+
         choice_key_eeg = [
             c.VALID_EVENTS_INV[i]
             for i in eeg_events[:, 2]
@@ -1884,7 +1945,12 @@ class HumanSessData(HumanDataClass):
 
         return manual_eeg_trials, eeg_trial_bounds, eeg_events, eeg_events_df
 
-    def get_trials_data(self, preprocessed_dir: Path, raise_error: bool = False):
+    def get_trials_data(
+        self,
+        preprocessed_dir: Path,
+        raise_error: bool = False,
+        eeg_incomplete: Literal["allow", "error", "skip"] = "error",
+    ):
         if not preprocessed_dir.exists():
             raise FileNotFoundError("Preprocessed data directory not found")
 
@@ -1931,7 +1997,17 @@ class HumanSessData(HumanDataClass):
             # eeg_trial_bounds,
             # eeg_events,
             # eeg_events_df,
-        ) = self.split_eeg_data_into_trials(eeg, behav)
+        ) = self.split_eeg_data_into_trials(eeg, behav, incomplete=eeg_incomplete)
+
+        if manual_eeg_trials is None:
+            msg = (
+                "Skipping session trials due to incomplete EEG event parsing "
+                f"(subj={subj_N:02}, sess={sess_N:02}, eeg_incomplete={eeg_incomplete!r})."
+            )
+            if raise_error:
+                raise ValueError(msg)
+            logger.warning(msg)
+            return [None] * 3
 
         return behav, manual_et_trials, manual_eeg_trials
 
@@ -3742,12 +3818,19 @@ class HumanSubjData(HumanDataClass):
 
         return erps
 
-    def get_trials_data(self, preprocessed_dir: Path, raise_error: bool = False):
+    def get_trials_data(
+        self,
+        preprocessed_dir: Path,
+        raise_error: bool = False,
+        eeg_incomplete: Literal["allow", "error", "skip"] = "error",
+    ):
         behav, manual_et_trials, manual_eeg_trials = [], [], []
 
         for sess_N, sess_obj in self.sessions.items():
             beh, et, eeg = sess_obj.get_trials_data(
-                preprocessed_dir=preprocessed_dir, raise_error=raise_error
+                preprocessed_dir=preprocessed_dir,
+                raise_error=raise_error,
+                eeg_incomplete=eeg_incomplete,
             )
 
             if any([i is None for i in [beh, et, eeg]]):

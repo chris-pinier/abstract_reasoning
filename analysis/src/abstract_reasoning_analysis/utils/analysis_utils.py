@@ -12,14 +12,141 @@ import contextlib
 import io
 import pickle
 import tomllib
-import yaml
 import re
 from rsatoolbox.data import Dataset, TemporalDataset
-from rsatoolbox.rdm import RDMs, calc_rdm, calc_rdm_movie
 from datetime import datetime
 import matplotlib.pyplot as plt
-from mne.channels.montage import DigMontage
 from mne.io.edf.edf import RawEDF
+import inspect
+from rich.table import Table
+from rich.text import Text
+from rich.console import Console
+
+console = Console()
+
+
+def xdir(
+    obj,
+    show_private=False,
+    pattern=None,
+    sort_by="name",
+    show_doc=False,
+    max_doc_len=60,
+):
+    """
+    An enhanced alternative to `dir()` using `rich` for formatted output.
+
+    Args:
+        obj: The object to inspect.
+        show_private (bool): If True, includes attributes starting with '_'. Defaults to False.
+        pattern (str): Optional regex pattern to filter attribute names.
+        sort_by (str): How to sort the results. Options: "name" (default), "type".
+        show_doc (bool): If True, adds a column showing the docstring/description.
+        max_doc_len (int): Maximum length of the docstring before truncating.
+    """
+    attributes = []
+
+    for attr_name in dir(obj):
+        # 1. Filter private/dunder methods
+        if not show_private and attr_name.startswith("_"):
+            continue
+
+        # 2. Filter by regex pattern (case-insensitive)
+        if pattern and not re.search(pattern, attr_name, re.IGNORECASE):
+            continue
+
+        docstring = ""
+
+        # 3. Safely determine type, category, and docstring
+        try:
+            # Check for property at the class level to avoid triggering it
+            is_prop = isinstance(getattr(type(obj), attr_name, None), property)
+
+            if is_prop:
+                category = "Property"
+                color = "green"
+                type_name = "property"
+                prop_obj = getattr(type(obj), attr_name)
+                docstring = inspect.getdoc(prop_obj) or ""
+            else:
+                attr_value = getattr(obj, attr_name)
+                type_name = type(attr_value).__name__
+                docstring = inspect.getdoc(attr_value) or ""
+
+                if inspect.isroutine(attr_value):
+                    category = "Method"
+                    color = "cyan"
+                elif inspect.isclass(attr_value):
+                    category = "Class"
+                    color = "magenta"
+                else:
+                    category = "Attribute"
+                    color = "yellow"
+
+        except Exception as e:
+            category = "Dynamic/Error"
+            color = "red"
+            type_name = f"Error: {type(e).__name__}"
+            docstring = str(e)
+
+        # Clean and truncate docstring
+        if docstring:
+            # Grab just the first line to keep the table clean
+            docstring = docstring.split("\n")[0].strip()
+            if len(docstring) > max_doc_len:
+                docstring = docstring[:max_doc_len] + "..."
+        else:
+            docstring = "-"
+
+        attributes.append(
+            {
+                "name": attr_name,
+                "category": category,
+                "type": type_name,
+                "color": color,
+                "doc": docstring,
+            }
+        )
+
+    # 4. Sorting logic
+    if sort_by == "name":
+        attributes.sort(key=lambda x: x["name"])
+    elif sort_by == "type":
+        attributes.sort(key=lambda x: (x["category"], x["name"]))
+
+    # 5. Build and render the Rich Table
+    obj_name = getattr(obj, "__name__", type(obj).__name__)
+    table = Table(
+        title=f"Attributes of [bold]{obj_name}[/bold]",
+        show_header=True,
+        header_style="bold white on grey27",
+    )
+
+    table.add_column("Name", style="bold")
+    table.add_column("Category", justify="center")
+    table.add_column("Type", style="dim")
+
+    # Conditionally add the Docstring column
+    if show_doc:
+        table.add_column("Docstring", style="italic dim white")
+
+    for attr in attributes:
+        row = [
+            Text(attr["name"], style=attr["color"]),
+            Text(attr["category"], style=attr["color"]),
+            attr["type"],
+        ]
+        if show_doc:
+            row.append(attr["doc"])
+
+        table.add_row(*row)
+
+    if not attributes:
+        console.print(
+            f"[italic dim]No attributes found matching the criteria for {obj_name}.[/italic dim]"
+        )
+    else:
+        console.print(table)
 
 
 def clean_filename(filename: Union[str, PosixPath], case=None) -> str:
@@ -565,23 +692,103 @@ def set_eeg_montage(
     raw_eeg.set_montage(montage)
 
 
-def read_file(file_path: Path) -> Any:
+def read_file(
+    file_path: Path | str, *, hdf5_key: str | None = None, verbose: bool = True
+):
     """
-    Reads a file based on its extension. Supports JSON, YAML, TOML, pickle, and CSV.
+    Reads a file based on its extension. Supports JSON, TOML, pickle, CSV, NPY, HDF5.
     Uses context managers for file handling.
 
     Args:
         file_path: A pathlib.Path object representing the file to read.
+        hdf5_key: Optional HDF5 key/path (e.g., "group/dataset" or pandas table key).
 
     Returns:
-        The loaded data from the file, or None if the file type is not supported.
+        The loaded data.
 
     Raises:
-        FileNotFoundError: If the file does not exist.
-        TypeError: if the filepath is not a Path object
-        ValueError: If the file extension is not supported.
-        Exception:  For any other errors during file reading (e.g., JSONDecodeError, YAMLError, pickle.UnpicklingError).
+        FileNotFoundError, TypeError, ValueError, Exception
     """
+    file_path = Path(file_path)
+
+    def _read_hdf5(file_path: Path, key: str | None = None) -> Any:
+        """
+        Read HDF5 (.h5/.hdf5).
+
+        If `key` is provided, tries:
+        1) pandas.read_hdf(file_path, key=key)
+        2) h5py dataset at that path (e.g. "group/dataset")
+
+        If `key` is not provided, tries:
+        1) pandas (if exactly one key exists)
+        2) returns a dict of datasets using h5py (leaf datasets only)
+        """
+        # First: try pandas HDFStore (common for DataFrames)
+        try:
+            if key is not None:
+                return pd.read_hdf(file_path, key=key)
+
+            with pd.HDFStore(file_path, mode="r") as store:
+                keys = store.keys()
+                if len(keys) == 1:
+                    return store.get(keys[0])
+                # If multiple tables, return dict of DataFrames
+                if len(keys) > 1:
+                    return {k.lstrip("/"): store.get(k) for k in keys}
+        except Exception:
+            # Not a pandas HDFStore (or key not found) -> fall back to h5py
+            pass
+
+        # Fallback: h5py for general HDF5
+        try:
+            import h5py
+            import numpy as np
+        except ImportError as e:
+            raise ImportError(
+                "Reading .h5/.hdf5 requires 'h5py' (and optionally numpy). "
+                "Install with: pip install h5py"
+            ) from e
+
+        def _as_python(x):
+            # Convert numpy scalars/bytes to Python types for nicer outputs
+            if isinstance(x, (bytes, bytearray)):
+                return x.decode("utf-8", errors="replace")
+            if "numpy" in type(x).__module__:
+                try:
+                    return x.item()
+                except Exception:
+                    return x
+            return x
+
+        out: dict[str, Any] = {}
+
+        with h5py.File(file_path, "r") as f:
+            if key is not None:
+                obj = f.get(key)
+                if obj is None:
+                    raise KeyError(f"HDF5 key/path not found: {key}")
+
+                if isinstance(obj, h5py.Dataset):
+                    data = obj[()]
+                    # data could be ndarray, scalar, or bytes
+                    if hasattr(data, "shape") and data.shape == ():
+                        return _as_python(data)
+                    return data
+                else:
+                    # It's a group; return its immediate children names
+                    return {"type": "group", "keys": list(obj.keys())}
+
+            # No key: collect all leaf datasets into a flat dict
+            def visitor(name, obj):
+                if isinstance(obj, h5py.Dataset):
+                    data = obj[()]
+                    if hasattr(data, "shape") and data.shape == ():
+                        data = _as_python(data)
+                    out[name] = data
+
+            f.visititems(visitor)
+
+        return out
 
     if not isinstance(file_path, Path):
         raise TypeError("file_path must be a pathlib.Path object.")
@@ -589,15 +796,15 @@ def read_file(file_path: Path) -> Any:
     if not file_path.exists():
         raise FileNotFoundError(f"The file '{file_path}' does not exist.")
 
-    # * Use a dictionary to map extensions to reader functions
     file_readers = {
         ".json": lambda f: json.load(f),
-        ".yaml": lambda f: yaml.safe_load(f),
-        ".yml": lambda f: yaml.safe_load(f),
         ".toml": lambda f: tomllib.load(f),
         ".pickle": lambda f: pickle.load(f),
         ".pkl": lambda f: pickle.load(f),
-        ".csv": lambda f: pd.read_csv(f),  # Pandas handles its own context internally
+        ".csv": lambda p: pd.read_csv(p),
+        ".npy": lambda p: np.load(p, allow_pickle=True),
+        ".h5": lambda p: _read_hdf5(p, key=hdf5_key),
+        ".hdf5": lambda p: _read_hdf5(p, key=hdf5_key),
     }
 
     ext = file_path.suffix.lower()
@@ -605,28 +812,27 @@ def read_file(file_path: Path) -> Any:
 
     if reader_func is None:
         raise ValueError(
-            f"Unsupported file extension: {ext}.  Supported extensions: {list(file_readers.keys())}"
+            f"Unsupported file extension: {ext}. Supported extensions: {list(file_readers.keys())}"
         )
 
+    print(f"Opening {ext} file...") if verbose else None
     binary_exts = [".toml", ".pickle", ".pkl"]
     try:
-        if ext in (".toml", ".json", ".yaml", ".yml", ".pickle", ".pkl"):
+        if ext in (".toml", ".json", ".pickle", ".pkl"):
             with open(file_path, "rb" if ext in binary_exts else "r") as file:
-                return reader_func(file)  # Pass the open file object
-        elif ext == ".csv":
-            return reader_func(file_path)  # pd.read_csv can take a path directly.
+                data = reader_func(file)
+        elif ext in (".csv", ".npy", ".h5", ".hdf5"):
+            data = reader_func(file_path)
         else:
-            # This should never be reached
             raise ValueError(f"Unsupported file extension despite earlier check {ext}.")
-    except (
-        json.JSONDecodeError,
-        yaml.YAMLError,
-        pickle.UnpicklingError,
-        pd.errors.ParserError,
-    ) as e:
+        dtype = type(data)
+        print(f"data type = {dtype}") if verbose else None
+
+        return data
+    except (json.JSONDecodeError, pickle.UnpicklingError, pd.errors.ParserError) as e:
         raise Exception(f"Error reading file '{file_path}': {e}") from e
     except FileNotFoundError:
-        raise  # Re-raise for consistency
+        raise
     except Exception as e:
         raise Exception(f"Error reading file '{file_path}': {e}") from e
 

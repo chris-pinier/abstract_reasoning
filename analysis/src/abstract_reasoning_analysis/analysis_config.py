@@ -86,7 +86,7 @@ def config() -> Box:
     EEG_CHAN_GROUPS = ANALYSIS_CONFIG.eeg.ch_groups
     ALL_BAD_CHANS = ANALYSIS_CONFIG.eeg.bad_channels
     EOG_CHANS = ANALYSIS_CONFIG.eeg.chans.eog
-    EMG_CHANS = ANALYSIS_CONFIG.eeg.chans.emg
+    EMG_CHANS = ANALYSIS_CONFIG.eeg.chans.get("emg", [])
     STIM_CHAN = ANALYSIS_CONFIG.eeg.chans.stim
     NON_EEG_CHANS = EOG_CHANS + EMG_CHANS + [STIM_CHAN]
 
