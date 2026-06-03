@@ -45,23 +45,23 @@ def _():
     # from data_loader.human_data import HumanSessData, HumanSubjData, HumanGroupData
     # from utils.analysis_utils import read_file, list_contents
     # from analysis_compare_clean import CombinedData
-    from abstract_reasoning_analysis.data_loader.human_data import (
+    from ar_analysis.data_loader.human_data import (
         HumanSessData,
         HumanSubjData,
         HumanGroupData,
     )
-    from abstract_reasoning_analysis.data_loader.ann_data import (
+    from ar_analysis.data_loader.ann_data import (
         ANNSubjData,
         ANNGroupData,
     )
-    from abstract_reasoning_analysis.utils.custom_type_hints import DATA_FMTS
-    from abstract_reasoning_analysis.utils.analysis_utils import (
+    from ar_analysis.utils.custom_type_hints import DATA_FMTS
+    from ar_analysis.utils.analysis_utils import (
         read_file,
         reorder_item_ids,
         list_contents,
     )
-    from abstract_reasoning_analysis.analysis_rsa import get_ds_and_rdm
-    from abstract_reasoning_analysis.analysis_config import Config as c
+    from ar_analysis.analysis_rsa import get_ds_and_rdm
+    from ar_analysis.analysis_config import Config as c
 
     # ! TEMP: to locate and use ffmpeg
     os.environ["PATH"] = "/opt/homebrew/bin:" + os.environ["PATH"]
@@ -840,7 +840,7 @@ def _(mo):
 def _():
     import numpy as np
     from tqdm.auto import tqdm
-    from abstract_reasoning_analysis.utils.analysis_utils import save_pickle
+    from ar_analysis.utils.analysis_utils import save_pickle
     from mne.io import concatenate_raws
     from rsatoolbox.data import Dataset
     from rsatoolbox.rdm import calc_rdm, compare_cosine, compare as compare_rdm

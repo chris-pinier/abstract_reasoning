@@ -6,12 +6,12 @@ import numpy as np
 import mne
 from tqdm.auto import tqdm
 from pprint import pprint
-from abstract_reasoning_analysis.data_loader.human_data import (
+from ar_analysis.data_loader.human_data import (
     HumanSessData,
     HumanSubjData,
     HumanGroupData,
 )
-from abstract_reasoning_analysis.utils.analysis_utils import list_contents
+from ar_analysis.utils.analysis_utils import list_contents
 
 
 MAIN_DIR = Path("/Volumes/SSD-512Go/PhD Data/experiment1")

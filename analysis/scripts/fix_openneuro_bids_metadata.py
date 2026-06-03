@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from abstract_reasoning_analysis.bids_converter.bids import BIDSdata
-from abstract_reasoning_analysis.paths import PACKAGE_DIR
+from ar_analysis.bids_converter.bids import BIDSdata
+from ar_analysis.paths import PACKAGE_DIR
 
 
 def parse_args() -> argparse.Namespace:

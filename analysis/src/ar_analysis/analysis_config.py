@@ -4,13 +4,13 @@ import mne
 import pendulum
 from box import Box
 import pandas as pd
-from abstract_reasoning_analysis.paths import (
+from ar_analysis.paths import (
     ANALYSIS_DIR,
     CONFIG_DIR,
     REPO_ROOT,
     SCRIPTS_DIR,
 )
-from abstract_reasoning_analysis.utils.analysis_utils import read_file
+from ar_analysis.utils.analysis_utils import read_file
 # from loguru import logger
 
 

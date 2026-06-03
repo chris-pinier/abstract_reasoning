@@ -16,7 +16,7 @@ from matplotlib.axes._axes import Axes
 import pandas as pd
 import re
 from rsatoolbox.rdm.rdms import RDMs
-from abstract_reasoning_analysis.utils.analysis_utils import (
+from ar_analysis.utils.analysis_utils import (
     get_trial_info,
     normalize,
 )

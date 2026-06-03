@@ -23,9 +23,9 @@ from loguru import logger
 # * ########################################
 # * RELATIVE IMPORTS
 # * ########################################
-from abstract_reasoning_analysis.analysis_config import Config as c
-from abstract_reasoning_analysis.paths import ANALYSIS_DIR, PACKAGE_DIR
-from abstract_reasoning_analysis.utils.analysis_utils import list_contents, read_file
+from ar_analysis.analysis_config import Config as c
+from ar_analysis.paths import ANALYSIS_DIR, PACKAGE_DIR
+from ar_analysis.utils.analysis_utils import list_contents, read_file
 
 # TODO: add lab keyboard layout to metadata
 

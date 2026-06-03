@@ -12,19 +12,19 @@ from tqdm.auto import tqdm
 # * ########################################
 # * RELATIVE IMPORTS
 # * ########################################
-from abstract_reasoning_analysis.data_loader.human_data import (
+from ar_analysis.data_loader.human_data import (
     HumanSessData,
     HumanSubjData,
     HumanGroupData,
 )
-from abstract_reasoning_analysis.utils.custom_type_hints import DATA_FMTS
-from abstract_reasoning_analysis.utils.analysis_utils import (
+from ar_analysis.utils.custom_type_hints import DATA_FMTS
+from ar_analysis.utils.analysis_utils import (
     read_file,
     reorder_item_ids,
     list_contents,
 )
-from abstract_reasoning_analysis.analysis_rsa import get_ds_and_rdm
-from abstract_reasoning_analysis.analysis_config import Config as c
+from ar_analysis.analysis_rsa import get_ds_and_rdm
+from ar_analysis.analysis_config import Config as c
 
 # * ########################################
 # * GLOBAL VARIABLES & CONFIG

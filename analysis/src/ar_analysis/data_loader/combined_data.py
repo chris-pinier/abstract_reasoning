@@ -16,23 +16,23 @@ from IPython.display import display
 # * ########################################
 # * RELATIVE IMPORTS
 # * ########################################
-from abstract_reasoning_analysis.data_loader.human_data import HumanGroupData
-from abstract_reasoning_analysis.data_loader.ann_data import ANNGroupData
-from abstract_reasoning_analysis.analysis_plotting import plot_rdm
-from abstract_reasoning_analysis.utils.analysis_utils import (
+from ar_analysis.data_loader.human_data import HumanGroupData
+from ar_analysis.data_loader.ann_data import ANNGroupData
+from ar_analysis.analysis_plotting import plot_rdm
+from ar_analysis.utils.analysis_utils import (
     save_pickle,
     apply_df_style,
     clean_ann_id,
     clean_filename,
 )
-from abstract_reasoning_analysis.analysis_rsa import (
+from ar_analysis.analysis_rsa import (
     match_datasets_on_nan,
     match_datasets_on_descriptor,
     simple_rsa,
     rsa_bootstrap,
     rsa_permutation,
 )
-from abstract_reasoning_analysis.analysis_config import Config as c
+from ar_analysis.analysis_config import Config as c
 
 # * ########################################
 # * GLOBAL VARIABLES

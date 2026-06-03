@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from abstract_reasoning_analysis.bids_converter.bids import BIDSdata
+from ar_analysis.bids_converter.bids import BIDSdata
 
 
 def parse_args() -> argparse.Namespace:

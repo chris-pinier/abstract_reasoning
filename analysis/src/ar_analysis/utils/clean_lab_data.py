@@ -28,7 +28,7 @@ from mne_bids import BIDSPath, print_dir_tree, write_raw_bids
 from icecream import ic
 
 # *
-from abstract_reasoning_analysis.analysis_plotting import (
+from ar_analysis.analysis_plotting import (
     get_gaze_heatmap,
     plot_eeg,
     plot_eeg_and_gaze_fixations,
@@ -38,7 +38,7 @@ from abstract_reasoning_analysis.analysis_plotting import (
     plot_sequence_img,
     plot_rdm,
 )
-from abstract_reasoning_analysis.utils.analysis_utils import (
+from ar_analysis.utils.analysis_utils import (
     check_ch_groups,
     get_stim_coords,
     get_trial_info,
@@ -56,8 +56,8 @@ from abstract_reasoning_analysis.utils.analysis_utils import (
     list_contents,
 )
 
-from abstract_reasoning_analysis.analysis_config import Config as c
-from abstract_reasoning_analysis.analysis_rsa import get_ds_and_rdm
+from ar_analysis.analysis_config import Config as c
+from ar_analysis.analysis_rsa import get_ds_and_rdm
 
 
 DATA_DIR = Path("/Volumes/Realtek 1Tb/PhD Data/experiment1/data/Lab-Copy")

@@ -25,11 +25,11 @@ from dataclasses import dataclass, field
 # * ########################################
 # * RELATIVE IMPORTS
 # * ########################################
-from abstract_reasoning_analysis.analysis_config import Config as c
-from abstract_reasoning_analysis.analysis_plotting import plot_rdm
-from abstract_reasoning_analysis.analysis_rsa import get_reference_rdms, get_ds_and_rdm
-from abstract_reasoning_analysis.paths import SCRIPTS_DIR
-from abstract_reasoning_analysis.utils.analysis_utils import read_file, reorder_item_ids
+from ar_analysis.analysis_config import Config as c
+from ar_analysis.analysis_plotting import plot_rdm
+from ar_analysis.analysis_rsa import get_reference_rdms, get_ds_and_rdm
+from ar_analysis.paths import SCRIPTS_DIR
+from ar_analysis.utils.analysis_utils import read_file, reorder_item_ids
 
 
 # * ########################################

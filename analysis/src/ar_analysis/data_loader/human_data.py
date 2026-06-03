@@ -30,18 +30,18 @@ from loguru import logger
 # * ########################################
 # * RELATIVE IMPORTS
 # * ########################################
-from abstract_reasoning_analysis.analysis_config import Config as c
-from abstract_reasoning_analysis.paths import CONFIG_DIR
-from abstract_reasoning_analysis.utils.custom_type_hints import DATA_FMTS
+from ar_analysis.analysis_config import Config as c
+from ar_analysis.paths import CONFIG_DIR
+from ar_analysis.utils.custom_type_hints import DATA_FMTS
 
-from abstract_reasoning_analysis.analysis_plotting import (
+from ar_analysis.analysis_plotting import (
     create_video_from_frames,
     get_gaze_heatmap,
     plot_eeg_and_gaze_fixations,
     prepare_eeg_data_for_plot,
     plot_rdm,
 )
-from abstract_reasoning_analysis.utils.analysis_utils import (
+from ar_analysis.utils.analysis_utils import (
     check_ch_groups,
     get_trial_info,
     locate_trials,
@@ -52,7 +52,7 @@ from abstract_reasoning_analysis.utils.analysis_utils import (
     reorder_item_ids,
     list_contents,
 )
-from abstract_reasoning_analysis.analysis_rsa import get_ds_and_rdm
+from ar_analysis.analysis_rsa import get_ds_and_rdm
 
 # * ########################################
 # * GLOBAL VARIABLES
