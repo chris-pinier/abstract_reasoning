@@ -13,6 +13,8 @@ credentials.toml
 TODO.txt
 .temp/
 
+.sync*
+
 mypi.ini
 
 # ! ######## Temporary ########

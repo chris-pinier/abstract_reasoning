@@ -18,7 +18,7 @@ def config() -> Box:
     # * ########################################
     # * GLOBAL CONFIGURATION
     # * ########################################
-    CREDENTIALS = Box(read_file(CONFIG_DIR / "credentials.toml"))
+    CREDENTIALS = Box(read_file(CONFIG_DIR / "credentials.toml", verbose=False))
     # notif = email_sender(CREDENTIALS.email.email, CREDENTIALS.email.password)
 
     PATTERNS = tuple(
@@ -65,11 +65,11 @@ def config() -> Box:
 
     # * Load experiment config
     # with open(EXP_CONFIG_FILE, "rb") as f:
-    EXP_CONFIG = Box(read_file(EXP_CONFIG_FILE))
+    EXP_CONFIG = Box(read_file(EXP_CONFIG_FILE, verbose=False))
 
     # * Load analysis config
     # with open(ANAYSIS_CONFIG_FILE, "rb") as f:
-    ANALYSIS_CONFIG = Box(read_file(ANAYSIS_CONFIG_FILE))
+    ANALYSIS_CONFIG = Box(read_file(ANAYSIS_CONFIG_FILE, verbose=False))
 
     BAD_SESSIONS = ANALYSIS_CONFIG.get("bad_sessions", {})
 

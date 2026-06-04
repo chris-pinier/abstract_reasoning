@@ -21,11 +21,10 @@ from ar_analysis.utils.analysis_utils import (
     normalize,
 )
 
-
 def plot_sequence_img(
     stim_pos: List,
     icon_images: dict,
-    screen_resolution: tuple,
+    screen_resolution: Tuple[int, int],
     save_dir: Union[str, Path],
     seq_id: Optional[str] = None,
 ):
