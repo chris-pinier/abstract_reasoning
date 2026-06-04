@@ -1294,15 +1294,18 @@ class HumanSessData(HumanDataClass):
                 .value_counts()
                 .to_dict()
             )
-        except:
+        except Exception as exc:
+            logger.exception("Could not extract EEG annotation event counts: {}", exc)
             events_counts = {}
         try:
             ch_positions = eeg_data._get_channel_positions().tolist()
-        except:
+        except Exception as exc:
+            logger.exception("Could not extract EEG channel positions: {}", exc)
             ch_positions = []
         try:
             dig_montage = ([str(i) for i in eeg_data.info["dig"]],)
-        except:
+        except Exception as exc:
+            logger.exception("Could not extract EEG digitized montage: {}", exc)
             dig_montage = []
 
         metadata = dict(
@@ -1474,7 +1477,7 @@ class HumanSessData(HumanDataClass):
             n_eeg_epochs = len(eeg_epochs.events)
             n_behav_trials = len(behav_data)
 
-            if n_eeg_epochs != n_et_epochs != n_behav_trials:
+            if len({n_eeg_epochs, n_et_epochs, n_behav_trials}) != 1:
                 print(
                     "WARNING: Mismatch in number of trials between data files:"
                     f"\n - {n_eeg_epochs = }\n - {n_et_epochs = }\n - {n_behav_trials = }"
@@ -2618,6 +2621,9 @@ class HumanSessData(HumanDataClass):
 
             # * Apply baseline correction and detrend
             eeg_slice = eeg_slice.apply_baseline(baseline=(None, 0), verbose="WARNING")
+            # TODO: This assignment does not actually detrend the data. If detrending is
+            # needed, pass detrend=1 when creating the Epochs/EpochsArray or apply an
+            # explicit MNE-compatible detrending step here.
             eeg_slice.detrend = 1
 
             # * Check if fixation is on target and duration is above minimum
@@ -2805,33 +2811,21 @@ class HumanSessData(HumanDataClass):
         #     .round()
         # )
 
-        # TODO: try the lines below
         # * Apply pd.to_numeric() here to ensure the data type is numeric
+        gaze_target_fixation_sequence_df["duration"] = pd.to_numeric(
+            gaze_target_fixation_sequence_df["duration"], errors="coerce"
+        )
         gaze_target_fixation_sequence_df["pupil_diam"] = pd.to_numeric(
             gaze_target_fixation_sequence_df["pupil_diam"], errors="coerce"
         ).round(2)
 
-        mean_duration_per_target = (
-            pd.to_numeric(
-                gaze_target_fixation_sequence_df.groupby("target_ind")["duration"],
-                errors="coerce",
-            )
-            .mean()
-            .round(2)
-        )
         mean_duration_per_target = gaze_target_fixation_sequence_df.groupby(
             "target_ind"
-        )["duration"].mean()  # .round(2)
+        )["duration"].mean()
 
-        mean_diam_per_target = (
-            pd.to_numeric(
-                gaze_target_fixation_sequence_df.groupby("target_ind")["pupil_diam"],
-                errors="coerce",
-            )
-            .mean()
-            .round(2)
-            # .round()
-        )
+        mean_diam_per_target = gaze_target_fixation_sequence_df.groupby("target_ind")[
+            "pupil_diam"
+        ].mean().round(2)
 
         fix_counts_per_target = gaze_target_fixation_sequence_df[
             "target_ind"
@@ -3467,7 +3461,7 @@ class HumanSessData(HumanDataClass):
                         for frp in frp_data
                     ]
 
-                if subj_data == "sess":
+                if data_fmt == "sess":
                     subj_data[sess_N] = [
                         sess_item_ids,
                         sess_patterns,
@@ -3482,6 +3476,12 @@ class HumanSessData(HumanDataClass):
             except Exception as E:
                 print(
                     f"WARNING: error in loading data for subj_{subj_N:02} - sess {sess_N:02}"
+                )
+                logger.exception(
+                    "Error loading FRP data for subj_{:02}, sess_{:02}: {}",
+                    subj_N,
+                    sess_N,
+                    E,
                 )
 
         # dict(zip(np.unique(sess_patterns[sess_missing_frps], return_counts=True)
