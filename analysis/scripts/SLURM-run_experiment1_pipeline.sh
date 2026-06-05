@@ -33,6 +33,8 @@ export NUMEXPR_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 #   sbatch --export=ALL,PROJECT_DIR=/path/to/repo,DATA_ROOT=/path/to/data,OUTPUT_BASE_DIR=/path/to/scratch ...
 PROJECT_DIR="${PROJECT_DIR:-$HOME/abstract_reasoning}"
 DATA_ROOT="${DATA_ROOT:-/path/to/experiment1/data}"
+HUMAN_DATA_DIR="${HUMAN_DATA_DIR:-$DATA_ROOT/Lab/raw-BIDS3}"
+PREPROCESSED_DIR="${PREPROCESSED_DIR:-$DATA_ROOT/Lab/preprocessed}"
 OUTPUT_BASE_DIR="${OUTPUT_BASE_DIR:-/scratch-shared/$USER/abstract_reasoning/experiments}"
 VENV_DIR="${VENV_DIR:-$PROJECT_DIR/analysis/.venv}"
 
@@ -54,6 +56,8 @@ mkdir -p "$OUTPUT_BASE_DIR"
 echo "Job started at: $(date)"
 echo "PROJECT_DIR:      $PROJECT_DIR"
 echo "DATA_ROOT:        $DATA_ROOT"
+echo "HUMAN_DATA_DIR:   $HUMAN_DATA_DIR"
+echo "PREPROCESSED_DIR: $PREPROCESSED_DIR"
 echo "OUTPUT_BASE_DIR:  $OUTPUT_BASE_DIR"
 echo "SUBJECTS_CSV:     $SUBJECTS_CSV"
 echo "N_WORKERS:        $N_WORKERS"
@@ -89,6 +93,8 @@ start_time=$(date +%s)
 
 srun python scripts/experiment1_pipeline.py \
     --data-root "$DATA_ROOT" \
+    --human-data-dir "$HUMAN_DATA_DIR" \
+    --preprocessed-dir "$PREPROCESSED_DIR" \
     --output-base-dir "$OUTPUT_BASE_DIR" \
     --subj-ns "$SUBJ_NS" \
     --rng-seed "$RNG_SEED" \
