@@ -8,6 +8,71 @@ from pathlib import Path
 from dataclasses import dataclass
 import pandas as pd
 
+
+def sanitize_descriptor_value(value):
+    """Convert 0-d numpy descriptors loaded from HDF5 back to Python scalars."""
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        return value.item()
+    return value
+
+
+def sanitize_descriptors(descriptors: Optional[Dict]) -> Optional[Dict]:
+    if descriptors is None:
+        return None
+    return {key: sanitize_descriptor_value(value) for key, value in descriptors.items()}
+
+
+def sanitize_dataset_descriptors(dataset: Dataset) -> Dataset:
+    """Sanitize dataset-level descriptors in-place and return the dataset."""
+    dataset.descriptors = sanitize_descriptors(dataset.descriptors)
+    return dataset
+
+
+def _as_array_obs_descriptors(obs_descriptors: Dict) -> Dict[str, np.ndarray]:
+    return {key: np.asarray(value) for key, value in obs_descriptors.items()}
+
+
+def _subset_dataset(dataset: Dataset, indices: np.ndarray) -> Dataset:
+    obs_descriptors = {
+        key: np.asarray(value)[indices]
+        for key, value in dataset.obs_descriptors.items()
+    }
+    return Dataset(
+        measurements=dataset.get_measurements()[indices],
+        descriptors=sanitize_descriptors(dataset.descriptors),
+        obs_descriptors=obs_descriptors,
+        channel_descriptors=dataset.channel_descriptors,
+    )
+
+
+def _finite_observation_mask(dataset: Dataset) -> np.ndarray:
+    measurements = np.asarray(dataset.get_measurements())
+    return np.isfinite(measurements.reshape(measurements.shape[0], -1)).all(axis=1)
+
+
+def _assert_aligned_descriptor(
+    ds1: Dataset, ds2: Dataset, descriptor: Optional[str] = None
+) -> None:
+    if descriptor is None:
+        descriptor = "item_id" if "item_id" in ds1.obs_descriptors else None
+    if descriptor is None:
+        return
+    if descriptor not in ds1.obs_descriptors or descriptor not in ds2.obs_descriptors:
+        raise KeyError(f"`{descriptor}` must be present in both datasets.")
+    vals1 = np.asarray(ds1.obs_descriptors[descriptor])
+    vals2 = np.asarray(ds2.obs_descriptors[descriptor])
+    if vals1.shape[0] != vals2.shape[0] or not np.array_equal(vals1, vals2):
+        raise ValueError(f"Datasets are not aligned on `{descriptor}`.")
+
+
+def calc_rdm_clean(dataset: Dataset, method: str, **kwargs):
+    """Calculate an RDM after descriptor sanitization and finite-data validation."""
+    dataset = sanitize_dataset_descriptors(dataset)
+    if not _finite_observation_mask(dataset).all():
+        raise ValueError("Dataset contains NaN or infinite observations before calc_rdm.")
+    return calc_rdm(dataset, method=method, **kwargs)
+
+
 def get_reference_rdms(
     n_trials: int = 400,
     n_trials_per_patt_type: int = 50,
@@ -65,14 +130,14 @@ def create_and_save_ds(
     if ds_type == "regular":
         dataset = Dataset(
             measurements=measurements,
-            descriptors=descriptors,
+            descriptors=sanitize_descriptors(descriptors),
             obs_descriptors=obs_descriptors,
             channel_descriptors=channel_descriptors,
         )
     else:
         dataset = TemporalDataset(
             measurements=measurements,
-            descriptors=descriptors,
+            descriptors=sanitize_descriptors(descriptors),
             obs_descriptors=obs_descriptors,
             channel_descriptors=channel_descriptors,
             time_descriptors=time_descriptors,
@@ -85,15 +150,15 @@ def create_and_save_ds(
 
 def create_and_save_rdm(
     dataset,
-    dissimilarity_metric,
-    fpath: Optional[Path] = None,
+    dissimilarity_metric: str,
+    fpath: Path | None = None,
     ds_type: str = "regular",
 ):
     allowed_ds_types = ["regular", "temporal"]
     assert ds_type in allowed_ds_types, f"ds_type must be one of {allowed_ds_types}"
 
     if ds_type == "regular":
-        rdm = calc_rdm(dataset, method=dissimilarity_metric)
+        rdm = calc_rdm_clean(dataset, method=dissimilarity_metric)
     else:
         rdm = calc_rdm_movie(dataset, method=dissimilarity_metric)
 
@@ -132,88 +197,65 @@ def get_ds_and_rdm(
 def match_datasets_on_descriptor(
     ds1: Dataset, ds2: Dataset, descriptor: Optional[str] = None
 ):
-    # # ! TEMP
-    # ds1 = ANNs_datasets['Qwen2.5-72B']
-    # ds2 = humans_datasets['subj_03']
-    # {k: ds.n_obs for k, ds in humans_datasets.items()}
-    # descriptor = 'item_ids'
-    # # ! TEMP
     if descriptor is None:
         return ds1, ds2
 
-    ds1_arr = ds1.get_measurements()
-    ds1_obs_desc = ds1.obs_descriptors
+    ds1_obs_desc = _as_array_obs_descriptors(ds1.obs_descriptors)
+    ds2_obs_desc = _as_array_obs_descriptors(ds2.obs_descriptors)
 
-    ds2_arr = ds2.get_measurements()
-    ds2_obs_desc = ds2.obs_descriptors
+    if descriptor not in ds1_obs_desc or descriptor not in ds2_obs_desc:
+        raise KeyError(f"`{descriptor}` must be present in both datasets.")
 
-    assert all([isinstance(v, np.ndarray) for v in ds1_obs_desc.values()])
-    assert all([isinstance(v, np.ndarray) for v in ds2_obs_desc.values()])
+    vals1 = ds1_obs_desc[descriptor]
+    vals2 = ds2_obs_desc[descriptor]
 
-    common = np.intersect1d(ds1_obs_desc[descriptor], ds2_obs_desc[descriptor])
-    ds1_inds = [i for i, v in enumerate(ds1_obs_desc[descriptor]) if v in common]
-    ds2_inds = [i for i, v in enumerate(ds2_obs_desc[descriptor]) if v in common]
+    if len(np.unique(vals1)) != len(vals1):
+        raise ValueError(f"`{descriptor}` contains duplicates in ds1.")
+    if len(np.unique(vals2)) != len(vals2):
+        raise ValueError(f"`{descriptor}` contains duplicates in ds2.")
 
-    assert np.all(
-        ds1_obs_desc[descriptor][ds1_inds] == ds2_obs_desc[descriptor][ds2_inds]
-    )
+    common = np.intersect1d(vals1, vals2)
+    if common.size == 0:
+        raise ValueError(f"No shared observations found for `{descriptor}`.")
 
-    ds1_obs_desc_new = {k: v[ds1_inds] for k, v in ds1_obs_desc.items()}
-    ds2_obs_desc_new = {k: v[ds2_inds] for k, v in ds2_obs_desc.items()}
+    ds1_lookup = {value: idx for idx, value in enumerate(vals1)}
+    ds2_lookup = {value: idx for idx, value in enumerate(vals2)}
+    ds1_inds = np.asarray([ds1_lookup[value] for value in common])
+    ds2_inds = np.asarray([ds2_lookup[value] for value in common])
 
-    ds1_arr = ds1_arr[ds1_inds]
-    ds2_arr = ds2_arr[ds2_inds]
-
-    ds1_new = Dataset(
-        measurements=ds1_arr,
-        descriptors=ds1.descriptors,
-        obs_descriptors=ds1_obs_desc_new,
-        channel_descriptors=ds1.channel_descriptors,
-    )
-
-    ds2_new = Dataset(
-        measurements=ds2_arr,
-        descriptors=ds2.descriptors,
-        obs_descriptors=ds2_obs_desc_new,
-        channel_descriptors=ds2.channel_descriptors,
-    )
+    ds1_new = _subset_dataset(ds1, ds1_inds)
+    ds2_new = _subset_dataset(ds2, ds2_inds)
+    _assert_aligned_descriptor(ds1_new, ds2_new, descriptor)
     return ds1_new, ds2_new
 
 
-def match_datasets_on_nan(ds1: Dataset, ds2: Dataset):
+def match_datasets_on_nan(
+    ds1: Dataset, ds2: Dataset, verify_descriptor: Optional[str] = None
+):
     ds1_arr = ds1.get_measurements()
-    ds1_obs_desc = ds1.obs_descriptors
-
     ds2_arr = ds2.get_measurements()
-    ds2_obs_desc = ds2.obs_descriptors
 
-    assert ds1_arr.shape[0] == ds2_arr.shape[0]
-    assert all([isinstance(v, np.ndarray) for v in ds1_obs_desc.values()])
-    assert all([isinstance(v, np.ndarray) for v in ds2_obs_desc.values()])
+    if ds1_arr.shape[0] != ds2_arr.shape[0]:
+        raise ValueError("Datasets shapes don't match. Align them first.")
 
-    nan_rows_ds1 = np.unique(np.where(np.isnan(ds1_arr))[0])
-    nan_rows_ds2 = np.unique(np.where(np.isnan(ds2_arr))[0])
-    nan_rows = np.concatenate([nan_rows_ds1, nan_rows_ds2])
-    mask = np.ones(ds1_arr.shape[0])
-    mask[nan_rows] = 0
-    mask = mask.astype(bool)
+    _assert_aligned_descriptor(ds1, ds2, verify_descriptor)
 
-    ds1_obs_desc_new = {k: v[mask] for k, v in ds1_obs_desc.items()}
-    ds2_obs_desc_new = {k: v[mask] for k, v in ds2_obs_desc.items()}
+    mask = _finite_observation_mask(ds1) & _finite_observation_mask(ds2)
+    return _subset_dataset(ds1, mask), _subset_dataset(ds2, mask)
 
-    ds1_new = Dataset(
-        measurements=ds1_arr[mask],
-        descriptors=ds1.descriptors,
-        obs_descriptors=ds1_obs_desc_new,
-        channel_descriptors=ds1.channel_descriptors,
-    )
 
-    ds2_new = Dataset(
-        measurements=ds2_arr[mask],
-        descriptors=ds2.descriptors,
-        obs_descriptors=ds2_obs_desc_new,
-        channel_descriptors=ds2.channel_descriptors,
-    )
+def match_datasets(
+    ds1: Dataset,
+    ds2: Dataset,
+    descriptor: Optional[str] = "item_id",
+    drop_nan: bool = True,
+) -> tuple[Dataset, Dataset]:
+    """Align two datasets by descriptor and optionally drop NaN observations."""
+    ds1_new, ds2_new = match_datasets_on_descriptor(ds1, ds2, descriptor)
+    if drop_nan:
+        ds1_new, ds2_new = match_datasets_on_nan(
+            ds1_new, ds2_new, verify_descriptor=descriptor
+        )
     return ds1_new, ds2_new
 
 
@@ -227,7 +269,7 @@ def simple_rsa(
     title: Optional[str] = None,
     pbar1: bool = True,
     pbar2: bool = False,
-    descriptor_match: Optional[str] = None,
+    descriptor_match: Optional[str] = "item_id",
 ):
     # # ! TEMP
     # human_data_dir = (
@@ -265,17 +307,18 @@ def simple_rsa(
 
         datasets = {id: datasets[id] for id in order}
 
+    labels = list(datasets.keys())
     similarities = np.zeros((len(datasets), len(datasets)))
 
     iterator1 = tqdm(datasets.items(), disable=not (pbar1), leave=True)
     for i, (id1, ds1) in enumerate(iterator1):
         iterator2 = tqdm(datasets.items(), disable=not (pbar2), leave=True)
         for j, (id2, ds2) in enumerate(iterator2):
-            ds1_new, ds2_new = match_datasets_on_descriptor(ds1, ds2, descriptor_match)
-            ds1_new, ds2_new = match_datasets_on_nan(ds1_new, ds2_new)
+            ds1_new, ds2_new = match_datasets(ds1, ds2, descriptor_match)
 
             rdm1, rdm2 = [
-                calc_rdm(ds, method=dissimilarity_metric) for ds in [ds1_new, ds2_new]
+                calc_rdm_clean(ds, method=dissimilarity_metric)
+                for ds in [ds1_new, ds2_new]
             ]
 
             similarities[i, j] = compare_rdms(
@@ -283,7 +326,6 @@ def simple_rsa(
             ).item()
 
     if show_fig or return_fig:
-        labels = list(datasets.keys())
         fig, ax = plt.subplots()
         heatmap = ax.imshow(similarities)
         ax.set_xticks(range(len(datasets)), labels, rotation=90)
@@ -313,6 +355,7 @@ def rsa_bootstrap(
     ci_percentiles: tuple = (2.5, 97.5),
     random_state: Optional[int] = None,
     pbar: bool = False,
+    descriptor_match: Optional[str] = "item_id",
 ):
     """
     Bootstrap‐estimate the similarity between two RSA datasets.
@@ -354,6 +397,8 @@ def rsa_bootstrap(
     # pbar = False
     # ! TEMP
 
+    dataset1, dataset2 = match_datasets(dataset1, dataset2, descriptor_match)
+
     # * 0. Check shapes
     arr1 = dataset1.get_measurements()
     arr2 = dataset2.get_measurements()
@@ -364,8 +409,8 @@ def rsa_bootstrap(
     n_cond = arr1.shape[0]
 
     # * 1. Compute observed RDMs & similarity
-    rdm1 = calc_rdm(dataset1, dissimilarity_metric)
-    rdm2 = calc_rdm(dataset2, dissimilarity_metric)
+    rdm1 = calc_rdm_clean(dataset1, dissimilarity_metric)
+    rdm2 = calc_rdm_clean(dataset2, dissimilarity_metric)
     r_obs = compare_rdms(rdm1, rdm2, method=similarity_metric).item()
 
     # * 2. Prepare for bootstrap
@@ -385,7 +430,7 @@ def rsa_bootstrap(
         resampled_ds = Dataset(
             measurements=arr,
             obs_descriptors=obs_descriptors,
-            descriptors=ds.descriptors,
+            descriptors=sanitize_descriptors(ds.descriptors),
             channel_descriptors=ds.channel_descriptors,
         )
 
@@ -404,8 +449,8 @@ def rsa_bootstrap(
         bs_ds2 = resample_dataset(dataset2, samp)
 
         # * 3c. recompute RDMs & correlation
-        bs_rdm1 = calc_rdm(bs_ds1, dissimilarity_metric)
-        bs_rdm2 = calc_rdm(bs_ds2, dissimilarity_metric)
+        bs_rdm1 = calc_rdm_clean(bs_ds1, dissimilarity_metric)
+        bs_rdm2 = calc_rdm_clean(bs_ds2, dissimilarity_metric)
 
         assert np.isnan(bs_rdm1.get_vectors()).sum() == 0
         assert np.isnan(bs_rdm2.get_vectors()).sum() == 0
@@ -427,6 +472,8 @@ def rsa_permutation(
     n_perm: int = 10_000,
     random_state: Optional[int] = None,
     pbar: bool = False,
+    descriptor_match: Optional[str] = "item_id",
+    rdm_descriptor: Optional[str] = None,
 ):
     # ! TEMP
     # level = "pattern"
@@ -455,9 +502,13 @@ def rsa_permutation(
     assert n_perm > 0, "`n_perm` must be at least 1"
 
     rng = np.random.default_rng(random_state)
+    dataset1, dataset2 = match_datasets(dataset1, dataset2, descriptor_match)
 
     # * Compare the original RDMs
-    rdm1, rdm2 = [calc_rdm(d, dissimilarity_metric) for d in [dataset1, dataset2]]
+    rdm1, rdm2 = [
+        calc_rdm_clean(d, dissimilarity_metric, descriptor=rdm_descriptor)
+        for d in [dataset1, dataset2]
+    ]
     observed_similarity = compare_rdms(rdm1, rdm2, similarity_metric).item()
 
     permuted_similarities = np.zeros(n_perm)
@@ -465,7 +516,7 @@ def rsa_permutation(
     dataset2_arr = dataset2.get_measurements()
     n_obs = dataset2_arr.shape[0]
 
-    # * Permutation: Shuffle the condition labels in the dataset
+    # * Permutation: Shuffle measurements relative to the fixed descriptors.
     iterator = tqdm(
         range(n_perm), desc="Permutation test", leave=False, disable=not (pbar)
     )
@@ -473,21 +524,21 @@ def rsa_permutation(
     for i in iterator:
         permuted_inds = rng.permutation(n_obs)
 
-        permuted_obs_desc = {
-            k: np.asarray(v)[permuted_inds] for k, v in dataset2.obs_descriptors.items()
-        }
-
         permuted_dataset2_arr = dataset2_arr[permuted_inds]
 
         permuted_dataset2 = Dataset(
             measurements=permuted_dataset2_arr,
-            obs_descriptors=permuted_obs_desc,
-            descriptors=dataset2.descriptors,
+            obs_descriptors=dataset2.obs_descriptors,
+            descriptors=sanitize_descriptors(dataset2.descriptors),
             channel_descriptors=dataset2.channel_descriptors,
         )
 
         # * Recompute the RDM using the permuted data
-        permuted_rdm2 = calc_rdm(permuted_dataset2, dissimilarity_metric)
+        permuted_rdm2 = calc_rdm_clean(
+            permuted_dataset2,
+            dissimilarity_metric,
+            descriptor=rdm_descriptor,
+        )
 
         # * Compare the first RDM with the second, permuted RDM
         permuted_similarity = compare_rdms(
