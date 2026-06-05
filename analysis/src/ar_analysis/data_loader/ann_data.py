@@ -29,7 +29,7 @@ from ar_analysis.analysis_config import Config as c
 from ar_analysis.analysis_plotting import plot_rdm
 from ar_analysis.analysis_rsa import get_reference_rdms, get_ds_and_rdm
 from ar_analysis.paths import SCRIPTS_DIR
-from ar_analysis.utils.analysis_utils import read_file, reorder_item_ids
+from ar_analysis.utils.analysis_utils import read_file, reorder_item_ids, list_contents
 
 
 # * ########################################
@@ -56,24 +56,24 @@ class ANNDataClass:
     def load_data(self):
         raise NotImplementedError
 
-    @staticmethod
-    def list_contents(
-        directory: Path,
-        pattern: str = "*",
-        sort: bool = True,
-        recurs: bool = False,
-        excl_dotunder=True,
-    ):
-        """List all files in the data directory matching the given pattern."""
-        search_func = getattr(directory, "rglob" if recurs else "glob")
+    # @staticmethod
+    # def list_contents(
+    #     directory: Path,
+    #     pattern: str = "*",
+    #     sort: bool = True,
+    #     recurs: bool = False,
+    #     excl_dotunder=True,
+    # ):
+    #     """List all files in the data directory matching the given pattern."""
+    #     search_func = getattr(directory, "rglob" if recurs else "glob")
 
-        if excl_dotunder:
-            res = [f for f in search_func(pattern) if not f.name.startswith("._")]
-        else:
-            res = [f for f in search_func(pattern)]
-        if sort:
-            res.sort()
-        return res
+    #     if excl_dotunder:
+    #         res = [f for f in search_func(pattern) if not f.name.startswith("._")]
+    #     else:
+    #         res = [f for f in search_func(pattern)]
+    #     if sort:
+    #         res.sort()
+    #     return res
 
 
 @dataclass
@@ -411,7 +411,7 @@ class ANNGroupData(ANNDataClass):
 
         if self.ann_ids is None:
             try:
-                self.ann_ids = [f.name for f in self.list_contents(self.data_dir)]
+                self.ann_ids = [f.name for f in list_contents(self.data_dir)]
             except Exception as e:
                 raise ValueError(
                     "Couldn't find subject directories, make sure they exist at: "

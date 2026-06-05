@@ -1,7 +1,7 @@
 import base64
 import io
 import shutil
-from typing import List, Optional, Dict, Tuple, Union
+from typing import List, Optional, Dict, Tuple, Union, Literal
 from matplotlib import pyplot as plt, patches as mpatches, ticker
 import mne
 import mplcursors
@@ -20,6 +20,9 @@ from ar_analysis.utils.analysis_utils import (
     get_trial_info,
     normalize,
 )
+import plotly.express as px
+from mne import Evoked
+
 
 def plot_sequence_img(
     stim_pos: List,
@@ -666,6 +669,45 @@ def plot_eeg(
 
     plt.tight_layout()
     mplcursors.cursor(hover=True)
+
+    return fig
+
+
+def plot_erp(
+    erp: Evoked,
+    method: Literal["mne", "plotly"] = "plotly",
+    title: str | None = None,
+    plotly_kwargs: dict | None = None,
+    mne_kwargs: dict | None = None,
+    # ax: Any | None = None,
+):
+
+    if method == "plotly":
+        # if plotly_kwargs is None:
+        default_plotly_kwargs = {
+            "labels": {
+                "value": "Amplitude",
+                "index": "Time (ms)",
+                "variable": "Channel",
+            },
+            "width": 800,
+            "height": 450,
+        }
+
+        plotly_kwargs = default_plotly_kwargs | (plotly_kwargs or {})
+
+        erp_df = erp.to_data_frame()
+        time = erp_df.pop("time")
+
+        fig = px.line(erp_df, title=title, **plotly_kwargs)
+        fig.show()
+
+    elif method == "mne":
+        if mne_kwargs is None:
+            mne_kwargs = dict()
+        fig = erp.plot(**mne_kwargs)
+    # else:
+    #     raise ValueError("method should be one of ['mne', 'plotly']")
 
     return fig
 

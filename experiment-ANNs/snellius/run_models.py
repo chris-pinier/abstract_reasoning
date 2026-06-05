@@ -368,7 +368,8 @@ def run_model_and_extract_layer_token_output(
         output_ids = model.generate(
             input_ids,
             attention_mask=attention_mask,
-            max_length=MAX_NEW_TOKENS,
+            # max_length=MAX_NEW_TOKENS,
+            max_new_tokens=MAX_NEW_TOKENS,
             do_sample=False,
             temperature=0.0,
             # top_p=1.0,

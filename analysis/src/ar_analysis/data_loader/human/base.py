@@ -11,7 +11,7 @@ class HumanDataClass:
 
     def __post_init__(self):
         self.data_dir = Path(self.data_dir)
-        self.EEG = {"sfreq": c.EEG_SFREQ}
+        self.eeg_info = {"sfreq": c.EEG_SFREQ}
 
         if self.data_fmt not in ["bids", "original"]:
             raise ValueError(f"`self.data_fmt` must be set to {DATA_FMTS}")

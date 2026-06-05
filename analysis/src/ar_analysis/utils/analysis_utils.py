@@ -217,6 +217,154 @@ def load_pickle(filename):
         return pickle.load(file)
 
 
+def _matplotlib_figure(fig_like: Any) -> plt.Figure | None:
+    """Return the Matplotlib Figure owned by a Figure/Axes/seaborn object."""
+    if isinstance(fig_like, plt.Figure):
+        return fig_like
+
+    figure = getattr(fig_like, "figure", None)
+    if isinstance(figure, plt.Figure):
+        return figure
+
+    figure = getattr(fig_like, "fig", None)
+    if isinstance(figure, plt.Figure):
+        return figure
+
+    return None
+
+
+def _is_plotly_figure(fig_like: Any) -> bool:
+    return callable(getattr(fig_like, "write_image", None))
+
+
+def _normalize_figure_formats(formats: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    normalized = []
+    for fmt in formats:
+        fmt = fmt.lower().lstrip(".")
+        if fmt not in {"png", "pdf", "html"}:
+            raise ValueError(
+                f"Unsupported figure format: {fmt!r}. Use 'png', 'pdf', or 'html'."
+            )
+        if fmt not in normalized:
+            normalized.append(fmt)
+    if not normalized:
+        raise ValueError("At least one output format is required.")
+    return tuple(normalized)
+
+
+def _figure_output_paths(
+    save_path: str | Path,
+    formats: tuple[str, ...],
+    pickle_suffix: str,
+) -> dict[str, Path]:
+    save_path = Path(save_path)
+    suffix = save_path.suffix.lower().lstrip(".")
+    base_path = save_path.with_suffix("") if suffix in formats else save_path
+    paths = {fmt: base_path.with_suffix(f".{fmt}") for fmt in formats}
+    if pickle_suffix.startswith("."):
+        paths["pickle"] = base_path.with_suffix(pickle_suffix)
+    else:
+        paths["pickle"] = base_path.with_name(f"{base_path.name}{pickle_suffix}")
+    return paths
+
+
+def save_figure(
+    fig: Any,
+    save_path: str | Path,
+    *,
+    dpi: int = 300,
+    figsize: tuple[float, float] | list[float] | None = None,
+    formats: tuple[str, ...] | list[str] = ("png", "pdf"),
+    plotly_html: bool = True,
+    pickle_sidecar: bool = True,
+    pickle_suffix: str = "-fig.pkl",
+    bbox_inches: str | None = "tight",
+    transparent: bool = False,
+    close: bool = False,
+    plotly_scale: float = 1,
+    **savefig_kwargs,
+) -> dict[str, Path]:
+    """
+    Save a Matplotlib, seaborn, or Plotly figure as PNG/PDF plus a pickle sidecar.
+
+    Seaborn objects are handled through their underlying Matplotlib Figure. For
+    Plotly figures, ``figsize`` is interpreted as inches and converted to pixels
+    using ``dpi`` because Plotly static exports are pixel-based. Plotly figures
+    also get an interactive HTML export by default.
+    """
+    formats = _normalize_figure_formats(formats)
+    paths = _figure_output_paths(save_path, formats, pickle_suffix)
+    paths[next(iter(paths))].parent.mkdir(parents=True, exist_ok=True)
+
+    mpl_fig = _matplotlib_figure(fig)
+    if mpl_fig is not None:
+        if "html" in formats:
+            raise ValueError("HTML export is only supported for Plotly figures.")
+
+        if figsize is not None:
+            mpl_fig.set_size_inches(*figsize, forward=True)
+
+        for fmt in formats:
+            mpl_fig.savefig(
+                paths[fmt],
+                dpi=dpi,
+                bbox_inches=bbox_inches,
+                transparent=transparent,
+                **savefig_kwargs,
+            )
+
+        if pickle_sidecar:
+            save_pickle(mpl_fig, paths["pickle"])
+
+        if close:
+            plt.close(mpl_fig)
+
+        return {key: value for key, value in paths.items() if key in formats or pickle_sidecar}
+
+    if _is_plotly_figure(fig):
+        if plotly_html and "html" not in formats:
+            formats = (*formats, "html")
+            paths = _figure_output_paths(save_path, formats, pickle_suffix)
+            paths[next(iter(paths))].parent.mkdir(parents=True, exist_ok=True)
+
+        width = height = None
+        if figsize is not None:
+            width = int(round(float(figsize[0]) * dpi))
+            height = int(round(float(figsize[1]) * dpi))
+            if callable(getattr(fig, "update_layout", None)):
+                fig.update_layout(width=width, height=height)
+
+        if "html" in formats:
+            fig.write_html(str(paths["html"]), include_plotlyjs="cdn")
+
+        for fmt in formats:
+            if fmt == "html":
+                continue
+            try:
+                fig.write_image(
+                    str(paths[fmt]),
+                    width=width,
+                    height=height,
+                    scale=plotly_scale,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "Could not export Plotly figure. Static PNG/PDF export requires "
+                    "Plotly's image export backend, usually the 'kaleido' package, "
+                    "and a working Chrome/Chromium runtime."
+                ) from exc
+
+        if pickle_sidecar:
+            save_pickle(fig, paths["pickle"])
+
+        return {key: value for key, value in paths.items() if key in formats or pickle_sidecar}
+
+    raise TypeError(
+        "save_figure expects a Matplotlib Figure/Axes, seaborn grid/object, "
+        "or Plotly figure with write_image()."
+    )
+
+
 def normalize(data: np.ndarray, method: str = "min-max"):
     avail_methods = {
         "max": lambda data: data / np.max(data),

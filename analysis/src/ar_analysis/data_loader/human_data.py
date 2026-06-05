@@ -82,7 +82,7 @@ class HumanDataClass:
 
     def __post_init__(self):
         self.data_dir = Path(self.data_dir)
-        self.EEG = {"sfreq": c.EEG_SFREQ}
+        self.eeg_info = {"sfreq": c.EEG_SFREQ}
 
         if self.data_fmt not in ["bids", "original"]:
             raise ValueError(f"`self.data_fmt` must be set to {DATA_FMTS}")
@@ -1958,10 +1958,14 @@ class HumanSessData(HumanDataClass):
 
     def get_trials_data(
         self,
-        preprocessed_dir: Path,
+        preprocessed_dir: Path | None = None,
         raise_error: bool = False,
         eeg_incomplete: Literal["allow", "error", "skip"] = "error",
     ):
+        if preprocessed_dir is None:
+            preprocessed_dir = self.preprocessed_dir
+        preprocessed_dir = Path(preprocessed_dir)
+
         if not preprocessed_dir.exists():
             raise FileNotFoundError("Preprocessed data directory not found")
 
@@ -2440,8 +2444,25 @@ class HumanSessData(HumanDataClass):
         pbar_off=True,
     ):
         """
-        This function uses the Eye Tracker's label to identify fixation events
+        Analyze valid target fixations during the trial decision period.
+
+        Legacy compatibility wrapper around the modular implementation.
         """
+        from ar_analysis.data_loader.human.session import (
+            HumanSessData as ModularHumanSessData,
+        )
+
+        return ModularHumanSessData.analyze_trial_decision_period(
+            self,
+            eeg_trial=eeg_trial,
+            et_trial=et_trial,
+            raw_behav=raw_behav,
+            trial_N=trial_N,
+            eeg_baseline=eeg_baseline,
+            eeg_window=eeg_window,
+            show_plots=show_plots,
+            pbar_off=pbar_off,
+        )
 
         # # ! TEMP
         # eeg_baseline: float = 0.100
@@ -3129,12 +3150,13 @@ class HumanSessData(HumanDataClass):
 
     def analyze_session(
         self,
-        save_dir: Path,
-        preprocessed_dir: Path,
+        save_dir: Path | None = None,
+        preprocessed_dir: Path | None = None,
         force_preprocess: bool = False,
         reuse_ica: bool = True,
         raise_error: bool = True,
         pbar: bool = True,
+        trial_pbar: Any | None = None,
     ):
         """ """
         # # ! TEMP: DEBUG
@@ -3149,7 +3171,14 @@ class HumanSessData(HumanDataClass):
         # raise_error: bool = False
         # # ! TEMP: DEBUG
 
-        save_dir.mkdir(exist_ok=True, parents=True)
+        should_save = save_dir is not None
+        if should_save:
+            save_dir = Path(save_dir)
+            save_dir.mkdir(exist_ok=True, parents=True)
+
+        if preprocessed_dir is None:
+            preprocessed_dir = self.preprocessed_dir
+        preprocessed_dir = Path(preprocessed_dir)
 
         if not preprocessed_dir.exists():
             raise FileNotFoundError("Preprocessed data directory not found")
@@ -3212,25 +3241,33 @@ class HumanSessData(HumanDataClass):
 
         # * Initialize data containers
         sess_frps: Dict[str, List] = {"sequence": [], "choices": []}
-        fixation_data_all = []
-        eeg_fixation_data_all = []
-        gaze_info_all = []
-        gaze_target_fixation_sequence_all = []
+        gaze_fixation_traces_all = []
+        eeg_fixation_epochs_all = []
+        stim_fixation_summary_all = []
+        fixation_events_all = []
         eeg_fixation_pac_data_all = []
 
-        for trial_N in tqdm(
-            behav.index, desc="Analyzing every trial", leave=False, disable=not pbar
-        ):
+        if trial_pbar is not None:
+            trial_iter = behav.index
+            trial_pbar.reset(total=len(behav.index))
+            trial_pbar.set_description(f"subj {subj_N:02} sess {sess_N:02} trials")
+            trial_pbar.refresh()
+        else:
+            trial_iter = tqdm(
+                behav.index, desc="Analyzing every trial", leave=False, disable=not pbar
+            )
+
+        for trial_N in trial_iter:
             # * Get the EEG and ET data for the current trial
             eeg_trial = next(manual_eeg_trials)
             et_trial = next(manual_et_trials)
 
             (
-                fixation_data,
-                eeg_fixation_data,
+                gaze_fixation_traces,
+                eeg_fixation_epochs,
                 eeg_fixation_pac_data,
-                gaze_target_fixation_sequence,
-                gaze_info,
+                fixation_events,
+                stim_fixation_summary,
                 fixations_sequence_erp,
                 fixations_choices_erp,
             ) = self.analyze_trial_decision_period(
@@ -3245,24 +3282,54 @@ class HumanSessData(HumanDataClass):
 
             sess_frps["sequence"].append(fixations_sequence_erp)
             sess_frps["choices"].append(fixations_choices_erp)
-            fixation_data_all.append(fixation_data)
-            eeg_fixation_data_all.append(eeg_fixation_data)
-            gaze_info_all.append(gaze_info)
-            gaze_target_fixation_sequence_all.append(gaze_target_fixation_sequence)
+            gaze_fixation_traces_all.append(gaze_fixation_traces)
+            eeg_fixation_epochs_all.append(eeg_fixation_epochs)
+            stim_fixation_summary_all.append(stim_fixation_summary)
+            fixation_events_all.append(fixation_events)
             eeg_fixation_pac_data_all.append(eeg_fixation_pac_data)
+            if trial_pbar is not None:
+                trial_pbar.update(1)
 
         # ic(len(eeg_fixation_pac_data_all))
 
-        # * Concatenate the gaze data
-        gaze_info = pd.concat([df for df in gaze_info_all if df.shape[0] > 0])
-        gaze_info.reset_index(drop=True, inplace=True)
+        # * Concatenate fixation summary tables
+        stim_fixation_summary_tables = [
+            df for df in stim_fixation_summary_all if df.shape[0] > 0
+        ]
+        if stim_fixation_summary_tables:
+            stim_fixation_summary = pd.concat(stim_fixation_summary_tables)
+        else:
+            stim_fixation_summary = pd.DataFrame(
+                columns=[
+                    "stim_ind",
+                    "count",
+                    "first_fix_order",
+                    "total_duration",
+                    "mean_duration",
+                    "mean_pupil_diam",
+                    "stim_name",
+                    "trial_N",
+                    "stim_type",
+                ]
+            )
+        stim_fixation_summary.reset_index(drop=True, inplace=True)
 
-        gaze_target_fixation_sequence = pd.concat(
-            [df for df in gaze_target_fixation_sequence_all if df.shape[0] > 0]
-        )
-        gaze_target_fixation_sequence.reset_index(
-            drop=False, inplace=True, names=["fixation_N"]
-        )
+        fixation_event_tables = [df for df in fixation_events_all if df.shape[0] > 0]
+        if fixation_event_tables:
+            fixation_events = pd.concat(fixation_event_tables)
+        else:
+            fixation_events = pd.DataFrame(
+                columns=[
+                    "stim_ind",
+                    "onset",
+                    "duration",
+                    "pupil_diam",
+                    "trial_N",
+                    "stim_name",
+                    "stim_type",
+                ]
+            )
+        fixation_events.reset_index(drop=False, inplace=True, names=["fixation_N"])
 
         valid_frps = dict(
             subj_N=subj_N,
@@ -3271,29 +3338,27 @@ class HumanSessData(HumanDataClass):
             n_choices_frps=len(sess_frps["choices"]) - sess_frps["choices"].count(None),
         )
 
-        # * Save the data to pickle files
-        pd.DataFrame([valid_frps]).to_csv(save_dir / "valid_frps.csv", index=False)
+        if should_save:
+            # * Save the data to pickle files
+            pd.DataFrame([valid_frps]).to_csv(save_dir / "valid_frps.csv", index=False)
 
-        save_pickle(sess_frps, save_dir / "sess_frps.pkl")
-        save_pickle(fixation_data_all, save_dir / "fixation_data.pkl")
-        save_pickle(eeg_fixation_data_all, save_dir / "eeg_fixation_data.pkl")
-        gaze_info.to_parquet(save_dir / "gaze_info.parquet", index=False)
-        gaze_target_fixation_sequence.to_parquet(
-            save_dir / "gaze_target_fixation_sequence.parquet", index=False
-        )
-        # save_pickle(gaze_info, save_dir / "gaze_info.pkl")
-        # save_pickle(
-        #     gaze_target_fixation_sequence,
-        #     save_dir / "gaze_target_fixation_sequence.pkl",
-        # )
-        save_pickle(eeg_fixation_pac_data_all, save_dir / "eeg_fixation_pac_data.pkl")
+            save_pickle(sess_frps, save_dir / "sess_frps.pkl")
+            save_pickle(gaze_fixation_traces_all, save_dir / "gaze_fixation_traces.pkl")
+            save_pickle(eeg_fixation_epochs_all, save_dir / "eeg_fixation_epochs.pkl")
+            stim_fixation_summary.to_parquet(
+                save_dir / "stim_fixation_summary.parquet", index=False
+            )
+            fixation_events.to_parquet(
+                save_dir / "fixation_events.parquet", index=False
+            )
+            save_pickle(eeg_fixation_pac_data_all, save_dir / "eeg_fixation_pac_data.pkl")
 
         return (
             sess_frps,
-            fixation_data,
-            eeg_fixation_data,
-            gaze_info,
-            gaze_target_fixation_sequence,
+            gaze_fixation_traces_all,
+            eeg_fixation_epochs_all,
+            stim_fixation_summary,
+            fixation_events,
             # eeg_fixation_pac_data_all,
         )
 
@@ -3758,7 +3823,7 @@ class HumanSubjData(HumanDataClass):
             patt_inds = behav_df.groupby(["pattern"]).groups
 
             info = mne.create_info(
-                ch_names=selected_chans, sfreq=self.EEG["sfreq"], ch_types="eeg"
+                ch_names=selected_chans, sfreq=self.eeg_info["sfreq"], ch_types="eeg"
             )
             sess_epochs = mne.concatenate_epochs(
                 [
@@ -3828,13 +3893,24 @@ class HumanSubjData(HumanDataClass):
 
     def get_trials_data(
         self,
-        preprocessed_dir: Path,
+        preprocessed_dir: Path | None = None,
         raise_error: bool = False,
         eeg_incomplete: Literal["allow", "error", "skip"] = "error",
+        pbar: bool = True,
     ):
+        if preprocessed_dir is None:
+            preprocessed_dir = self.preprocessed_dir
+        preprocessed_dir = Path(preprocessed_dir)
+
         behav, manual_et_trials, manual_eeg_trials = [], [], []
 
-        for sess_N, sess_obj in self.sessions.items():
+        session_iter = tqdm(
+            self.sessions.items(),
+            desc=f"Loading subj {self.subj_N:02} session trials",
+            total=len(self.sessions),
+            disable=not pbar,
+        )
+        for sess_N, sess_obj in session_iter:
             beh, et, eeg = sess_obj.get_trials_data(
                 preprocessed_dir=preprocessed_dir,
                 raise_error=raise_error,
@@ -4134,7 +4210,7 @@ class HumanSubjData(HumanDataClass):
         )
 
         info = mne.create_info(
-            ch_names=selected_chans, sfreq=self.EEG["sfreq"], ch_types="eeg"
+            ch_names=selected_chans, sfreq=self.eeg_info["sfreq"], ch_types="eeg"
         )
         eeg_epochs = mne.concatenate_epochs(
             [mne.EpochsArray(e, info, verbose="WARNING") for e in sess_epochs.values()],
@@ -4244,25 +4320,45 @@ class HumanSubjData(HumanDataClass):
         force_preprocess: bool = False,
         reuse_ica: bool = True,
         raise_error: bool = True,
+        pbar: bool = True,
     ):
-        if save_dir is None:
-            # print("using default save directory for subject-level analysis")
-            save_dir = c.EXPORT_DIR / f"subj_lvl/subj_{self.subj_N:02}"
+        should_save = save_dir is not None
+        if should_save:
+            save_dir = Path(save_dir)
             save_dir.mkdir(exist_ok=True, parents=True)
 
         if preprocessed_dir is None:
             preprocessed_dir = self.preprocessed_dir
+        preprocessed_dir = Path(preprocessed_dir)
 
         """Analyze all sessions for the subject."""
         sess_results = {}
-        for sess_N, sess_obj in self.sessions.items():
-            sess_results[sess_N] = sess_obj.analyze_session(
-                save_dir=save_dir / f"sess_{sess_N:02}",
-                preprocessed_dir=preprocessed_dir,
-                force_preprocess=force_preprocess,
-                reuse_ica=reuse_ica,
-                raise_error=raise_error,
-            )
+        sessions_iter = tqdm(
+            self.sessions.items(),
+            desc=f"Analyzing subj {self.subj_N:02} sessions",
+            total=len(self.sessions),
+            disable=not pbar,
+        )
+        trial_pbar = tqdm(
+            total=0,
+            desc="Session trials",
+            leave=False,
+            disable=not pbar,
+        )
+        try:
+            for sess_N, sess_obj in sessions_iter:
+                sess_save_dir = save_dir / f"sess_{sess_N:02}" if should_save else None
+                sess_results[sess_N] = sess_obj.analyze_session(
+                    save_dir=sess_save_dir,
+                    preprocessed_dir=preprocessed_dir,
+                    force_preprocess=force_preprocess,
+                    reuse_ica=reuse_ica,
+                    raise_error=raise_error,
+                    pbar=False,
+                    trial_pbar=trial_pbar,
+                )
+        finally:
+            trial_pbar.close()
         return sess_results
 
     def get_gaze_heatmaps_from_fixation_data(self, data_dir: Path, save_dir: Path):
@@ -4800,14 +4896,22 @@ class HumanGroupData(HumanDataClass):
     # * Rest of the code
     # * ########################################
     def get_trials_data(
-        self, preprocessed_dir: Path, raise_error: bool = False, pbar: bool = True
+        self,
+        preprocessed_dir: Path | None = None,
+        raise_error: bool = False,
+        pbar: bool = True,
     ):
+        if preprocessed_dir is None:
+            preprocessed_dir = self.preprocessed_dir
+        preprocessed_dir = Path(preprocessed_dir)
 
         behav, manual_et_trials, manual_eeg_trials = {}, {}, {}
 
         for subj_N, subj_obj in tqdm(self.subjects.items()):
             beh, et, eeg = subj_obj.get_trials_data(
-                preprocessed_dir=preprocessed_dir, raise_error=raise_error
+                preprocessed_dir=preprocessed_dir,
+                raise_error=raise_error,
+                pbar=pbar,
             )
             behav[subj_N] = beh
             manual_et_trials[subj_N] = et

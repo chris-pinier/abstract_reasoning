@@ -299,14 +299,22 @@ class HumanGroupData(HumanDataClass):
     # * Rest of the code
     # * ########################################
     def get_trials_data(
-        self, preprocessed_dir: Path, raise_error: bool = False, pbar: bool = True
+        self,
+        preprocessed_dir: Path | None = None,
+        raise_error: bool = False,
+        pbar: bool = True,
     ):
+        if preprocessed_dir is None:
+            preprocessed_dir = self.preprocessed_dir
+        preprocessed_dir = Path(preprocessed_dir)
 
         behav, manual_et_trials, manual_eeg_trials = {}, {}, {}
 
         for subj_N, subj_obj in tqdm(self.subjects.items()):
             beh, et, eeg = subj_obj.get_trials_data(
-                preprocessed_dir=preprocessed_dir, raise_error=raise_error
+                preprocessed_dir=preprocessed_dir,
+                raise_error=raise_error,
+                pbar=pbar,
             )
             behav[subj_N] = beh
             manual_et_trials[subj_N] = et
