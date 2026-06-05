@@ -6,7 +6,7 @@ uv sync
 
 cd ../analysis
 uv sync
-uv pip install -e .
+uv pip install -e . --no-deps
 
 cd ../experiment-ANNs
 uv sync
