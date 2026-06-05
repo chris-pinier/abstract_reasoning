@@ -1,10 +1,11 @@
 # ! ########### PROJECT SPECIFIC ########### ! # 
 logs/*
 !logs/.gitkeep
-draft/*
-drafts/*
-jobs/*
-temp/*
+
+draft/
+drafts/
+jobs/
+temp/
 
 eyetracking/
 archive/

@@ -148,6 +148,31 @@ class HumanSessData(HumanDataClass):
                 f"Behav file extension ({fext}) not supported. Supported formats: {supported_fmts}"
             )
 
+    def get_raw_eog_data(
+        self,
+        raw_eeg: mne.io.Raw | None = None,
+        verbose: bool = False,
+        preload: bool = False,
+        bad_chans: List[str] | None = None,
+    ) -> mne.io.Raw:
+        """Return the raw EOG channels stored in the EEG/BDF recording."""
+        if raw_eeg is None:
+            raw_eeg = self.get_raw_eeg_data(
+                verbose=verbose,
+                preload=preload,
+                bad_chans=bad_chans,
+            )
+
+        missing_eog_chans = [ch for ch in c.EOG_CHANS if ch not in raw_eeg.ch_names]
+        if missing_eog_chans:
+            raise ValueError(
+                f"Missing expected EOG channels in raw EEG data: {missing_eog_chans}"
+            )
+
+        raw_eog = raw_eeg.copy().pick(c.EOG_CHANS)
+        raw_eog.set_channel_types({ch: "eog" for ch in raw_eog.ch_names})
+        return raw_eog
+
     def get_raw_eeg_data(
         self,
         verbose: bool = False,
@@ -169,36 +194,6 @@ class HumanSessData(HumanDataClass):
         )
 
         return raw_eeg
-
-    def get_et_calibration(self):
-        if self.data_fmt == "bids":
-            raise NotImplementedError(
-                ".asc file containing calibration data not ported to the BIDS converted dataset"
-            )
-        else:
-            et_fpath = self._search_res_file(
-                regex=r".+\.asc", label="Eye Tracking Calibration"
-            )
-
-            # * read_eyelink_calibration is too verbose by default, silencing it
-            with contextlib.redirect_stdout(io.StringIO()):
-                et_cals = read_eyelink_calibration(et_fpath)
-                if not et_cals:
-                    print(
-                        f"WARNING: No calibration found for subj {self.subj_N}, sess {self.sess_N}"
-                    )
-
-    def get_raw_et_data(self):
-        fmt = self.data_fmt
-        if fmt == "bids":
-            return self._get_raw_et_data_bids()
-        elif fmt == "original":
-            return self._get_raw_et_data_asc()
-        else:
-            raise ValueError(
-                "Problem encountered when trying to load eye-tracking data. ",
-                f"`self.data_fmt` must be set to {DATA_FMTS}",
-            )
 
     def _get_raw_et_data_asc(
         self, verbose: str = "WARNING"
@@ -308,11 +303,44 @@ class HumanSessData(HumanDataClass):
 
         annotations = eye_annotations + exp_annotations
 
+        unique_events = list(raw.annotations.to_data_frame()["description"].unique())
+        print(f"Unique events found: {'\n'.join(unique_events)}")
+
         raw.set_annotations(annotations)
 
         raw.filenames = [physio_tsv]
 
         return raw
+
+    def get_et_calibration(self):
+        if self.data_fmt == "bids":
+            raise NotImplementedError(
+                ".asc file containing calibration data not ported to the BIDS converted dataset"
+            )
+        else:
+            et_fpath = self._search_res_file(
+                regex=r".+\.asc", label="Eye Tracking Calibration"
+            )
+
+            # * read_eyelink_calibration is too verbose by default, silencing it
+            with contextlib.redirect_stdout(io.StringIO()):
+                et_cals = read_eyelink_calibration(et_fpath)
+                if not et_cals:
+                    print(
+                        f"WARNING: No calibration found for subj {self.subj_N}, sess {self.sess_N}"
+                    )
+
+    def get_raw_et_data(self):
+        fmt = self.data_fmt
+        if fmt == "bids":
+            return self._get_raw_et_data_bids()
+        elif fmt == "original":
+            return self._get_raw_et_data_asc()
+        else:
+            raise ValueError(
+                "Problem encountered when trying to load eye-tracking data. ",
+                f"`self.data_fmt` must be set to {DATA_FMTS}",
+            )
 
     def get_sess_info(self, fmt: DATA_FMTS | None = None) -> Dict:
         fmt = self.data_fmt if fmt is None else fmt
@@ -952,9 +980,29 @@ class HumanSessData(HumanDataClass):
 
         return behav_data
 
-    def preprocess_et_data(self) -> Tuple[mne.io.eyelink.eyelink.RawEyelink, list]:
-        raw_et = self.get_raw_et_data()
+    def preprocess_et_data(
+        self,
+        raw_et: mne.io.eyelink.eyelink.RawEyelink,
+    ) -> mne.io.eyelink.eyelink.RawEyelink:
         return raw_et  # , et_cals
+
+    def preprocess_eog_data(
+        self,
+        raw_eog: mne.io.Raw,
+        l_freq: float | None = None,
+        h_freq: float | None = None,
+    ) -> mne.io.Raw:
+        """Apply lightweight EOG preprocessing.
+
+        By default this only returns a loaded copy with EOG channel types
+        preserved. Optional filtering is available for analyses that need it.
+        """
+        prepro_eog = raw_eog.copy()
+        prepro_eog.load_data(verbose="WARNING")
+        prepro_eog.set_channel_types({ch: "eog" for ch in prepro_eog.ch_names})
+        if l_freq is not None or h_freq is not None:
+            prepro_eog.filter(l_freq=l_freq, h_freq=h_freq, verbose="WARNING")
+        return prepro_eog
 
     def identify_bad_eeg_channels(self):
         raise NotImplementedError
@@ -1149,7 +1197,7 @@ class HumanSessData(HumanDataClass):
 
         return prepro_eeg
 
-    def extract_eeg_metadata(self) -> Dict[str, Any]:
+    def get_eeg_metadata(self) -> Dict[str, Any]:
         eeg_data = self.get_eeg_data()
         fpath = Path(eeg_data.filenames[0])
         fstem = fpath.stem
@@ -1193,13 +1241,24 @@ class HumanSessData(HumanDataClass):
         #     json.dump(metadata, fp=f, indent=4)
         return metadata
 
-    def extract_et_metadata(self):  # -> Dict[str, Any]:
+    def get_et_metadata(self):  # -> Dict[str, Any]:
         # if self.data_fmt == 'bids':
         #     metadata = None
         # else:
         #     metadata = None
         # return metadata
         raise NotImplementedError
+
+    def get_metadata(self, fmt: DATA_FMTS | None = None):
+        sess_info = self.get_sess_info(fmt=fmt)
+        eeg_metadata = self.get_eeg_metadata()
+        # et_metadata = self.get_et_metadata()
+        et_metadata = {}
+
+        metadata = dict(sess_info=sess_info, eeg=eeg_metadata, et=et_metadata)
+        metadata = Box(metadata)
+
+        return metadata
 
     @staticmethod
     def annotate_eeg_from_events(data: mne.io.Raw, verbose: str = "WARNING"):
@@ -1239,6 +1298,15 @@ class HumanSessData(HumanDataClass):
     def get_behav_data(self) -> pd.DataFrame:
         return self.preprocess_behav()
 
+    def get_eog_data(
+        self,
+        raw_eeg: mne.io.Raw | None = None,
+        l_freq: float | None = None,
+        h_freq: float | None = None,
+    ) -> mne.io.Raw:
+        raw_eog = self.get_raw_eog_data(raw_eeg=raw_eeg)
+        return self.preprocess_eog_data(raw_eog, l_freq=l_freq, h_freq=h_freq)
+
     def get_eeg_data(self) -> mne.io.Raw:
         raw_eeg = self.get_raw_eeg_data()
 
@@ -1252,7 +1320,8 @@ class HumanSessData(HumanDataClass):
         )
 
     def get_et_data(self) -> Tuple[mne.io.eyelink.eyelink.RawEyelink, list]:
-        prepro_et_data = self.get_raw_et_data()
+        raw_et = self.get_raw_et_data()
+        prepro_et_data = self.preprocess_et_data(raw_et)
         return prepro_et_data  # , et_cals
 
     def get_data(
@@ -1817,10 +1886,14 @@ class HumanSessData(HumanDataClass):
 
     def get_trials_data(
         self,
-        preprocessed_dir: Path,
+        preprocessed_dir: Path | None = None,
         raise_error: bool = False,
         eeg_incomplete: Literal["allow", "error", "skip"] = "error",
     ):
+        if preprocessed_dir is None:
+            preprocessed_dir = self.preprocessed_dir
+        preprocessed_dir = Path(preprocessed_dir)
+
         if not preprocessed_dir.exists():
             raise FileNotFoundError("Preprocessed data directory not found")
 
@@ -2287,6 +2360,358 @@ class HumanSessData(HumanDataClass):
     # * ########################################
     # * Analyze / Process the preprocessed data
     # * ########################################
+    @staticmethod
+    def _empty_stim_fixation_summary() -> pd.DataFrame:
+        return pd.DataFrame(
+            columns=[
+                "stim_ind",
+                "count",
+                "first_fix_order",
+                "total_duration",
+                "mean_duration",
+                "mean_pupil_diam",
+                "stim_name",
+                "trial_N",
+                "stim_type",
+            ]
+        )
+
+    @staticmethod
+    def _stimulus_type_map(
+        stim_labels: dict[int, str],
+        sequence_items: dict[int, str],
+        solution_stim_ind: int,
+    ) -> dict[int, str]:
+        stimulus_types = {}
+        for stim_ind, icon_name in stim_labels.items():
+            if stim_ind < 7:
+                stimulus_types[stim_ind] = "sequence"
+            elif stim_ind == 7:
+                stimulus_types[stim_ind] = "question_mark"
+            elif stim_ind == solution_stim_ind:
+                stimulus_types[stim_ind] = "choice_correct"
+            elif icon_name in sequence_items.values():
+                stimulus_types[stim_ind] = "choice_incorrect_related"
+            else:
+                stimulus_types[stim_ind] = "choice_incorrect_unrelated"
+        return stimulus_types
+
+    @staticmethod
+    def _fixation_events_table(
+        fixation_rows: list[list],
+        trial_N: int,
+        stim_labels: dict[int, str],
+        stimulus_types: dict[int, str],
+    ) -> pd.DataFrame:
+        fixation_events = pd.DataFrame(
+            fixation_rows,
+            columns=["stim_ind", "onset", "duration", "pupil_diam"],
+        )
+        fixation_events["trial_N"] = trial_N
+        fixation_events["stim_name"] = fixation_events["stim_ind"].replace(stim_labels)
+        fixation_events["stim_type"] = fixation_events["stim_ind"].replace(
+            stimulus_types
+        )
+        fixation_events["duration"] = pd.to_numeric(
+            fixation_events["duration"], errors="coerce"
+        )
+        fixation_events["pupil_diam"] = pd.to_numeric(
+            fixation_events["pupil_diam"], errors="coerce"
+        ).round(2)
+        return fixation_events
+
+    @classmethod
+    def _stim_fixation_summary(
+        cls,
+        fixation_events: pd.DataFrame,
+        trial_N: int,
+        stim_labels: dict[int, str],
+        stimulus_types: dict[int, str],
+    ) -> pd.DataFrame:
+        if fixation_events.empty:
+            return cls._empty_stim_fixation_summary()
+
+        first_fixation_order = (
+            fixation_events.sort_values("onset")
+            .groupby("stim_ind")
+            .first()["onset"]
+            .rank()
+            .astype(int)
+        )
+        first_fixation_order.name = "first_fix_order"
+
+        summary = pd.concat(
+            [
+                fixation_events["stim_ind"].value_counts().rename("count"),
+                first_fixation_order,
+                fixation_events.groupby("stim_ind")["duration"]
+                .sum()
+                .rename("total_duration"),
+                fixation_events.groupby("stim_ind")["duration"]
+                .mean()
+                .rename("mean_duration"),
+                fixation_events.groupby("stim_ind")["pupil_diam"]
+                .mean()
+                .round(2)
+                .rename("mean_pupil_diam"),
+            ],
+            axis=1,
+        ).reset_index()
+
+        summary["stim_name"] = summary["stim_ind"].replace(stim_labels)
+        summary["trial_N"] = trial_N
+        summary["stim_type"] = summary["stim_ind"].replace(stimulus_types)
+        summary.sort_values("stim_ind", inplace=True)
+        return summary
+
+    @staticmethod
+    def _epochs_by_stim(
+        eeg_arrays_by_stim: dict[int, list[np.ndarray]],
+        eeg_info: mne.Info,
+        eeg_baseline: float,
+    ) -> dict[int, mne.EpochsArray]:
+        epochs_by_stim = {}
+        for stim_ind, epoch_arrays in eeg_arrays_by_stim.items():
+            if not epoch_arrays:
+                continue
+            epochs_by_stim[stim_ind] = mne.EpochsArray(
+                np.stack(epoch_arrays),
+                eeg_info,
+                tmin=-eeg_baseline,
+                baseline=(None, 0),
+                verbose="WARNING",
+            )
+            # TODO: If detrending is needed, pass detrend=1 when creating an
+            # MNE Epochs object from events, or explicitly detrend epochs_by_stim
+            # with a validated MNE/scipy routine here.
+        return epochs_by_stim
+
+    @staticmethod
+    def _average_fixation_epochs(
+        epochs_by_stim: dict[int, mne.EpochsArray],
+        stim_inds: list[int],
+    ) -> mne.Evoked | None:
+        selected_epochs = [
+            epochs
+            for stim_ind, epochs in epochs_by_stim.items()
+            if stim_ind in stim_inds and len(epochs) > 0
+        ]
+        if not selected_epochs:
+            return None
+        return mne.concatenate_epochs(selected_epochs, verbose="WARNING").average()
+
+    @staticmethod
+    def _stim_inds_for_scope(
+        stim_scope: Literal["sequence", "choices", "both"],
+        sequence_items: dict[int, str],
+        choice_items: dict[int, str],
+    ) -> list[int]:
+        sequence_stim_inds = list(sequence_items.keys())
+        choice_stim_inds = [i + len(sequence_items) for i in choice_items.keys()]
+
+        if stim_scope == "sequence":
+            return sequence_stim_inds
+        if stim_scope == "choices":
+            return choice_stim_inds
+        if stim_scope == "both":
+            return sequence_stim_inds + choice_stim_inds
+        raise ValueError("stim_scope must be one of: 'sequence', 'choices', 'both'")
+
+    def _plot_fixation_window(
+        self,
+        eeg_epoch_array: np.ndarray | None,
+        eeg_info: mne.Info,
+        cropped_eeg_trial: mne.io.Raw,
+        fixation_is_valid: bool,
+        on_target: bool,
+        stim_ind: int | None,
+        fixation_duration: float,
+        eeg_fixation_start_sample: int,
+        eeg_fixation_stop_sample: int,
+        gaze_x: np.ndarray,
+        gaze_y: np.ndarray,
+        eeg_baseline: float,
+        response_onset: float,
+        stimulus_positions: list,
+        plot_context: tuple,
+    ) -> None:
+        _, ch_group_inds, group_colors, chans_pos_xy = plot_context
+        plot_title = f"ICON-{stim_ind}" if on_target else "OFF-TARGET"
+        plot_title += f" ({fixation_duration * 1000:.0f} ms)"
+        plot_title += " - " + ("SAVED" if fixation_is_valid else "DISCARDED")
+
+        if eeg_epoch_array is None:
+            plot_eeg_data_uv = np.empty((0, 0))
+            eeg_start_time = np.nan
+            eeg_end_time = np.nan
+        else:
+            eeg_epoch = mne.EpochsArray(
+                [eeg_epoch_array],
+                eeg_info,
+                tmin=-eeg_baseline,
+                baseline=(None, 0),
+                verbose="WARNING",
+            )
+            plot_eeg_data_uv = eeg_epoch.get_data(picks="eeg", units="uV")[0]
+            eeg_start_time = cropped_eeg_trial.times[eeg_fixation_start_sample]
+            eeg_end_time = cropped_eeg_trial.times[eeg_fixation_stop_sample - 1]
+
+        plot_eeg_and_gaze_fixations(
+            eeg_data=plot_eeg_data_uv,
+            eeg_sfreq=c.EEG_SFREQ,
+            et_data=np.stack([gaze_x, gaze_y], axis=1).T,
+            eeg_baseline=eeg_baseline,
+            response_onset=response_onset,
+            eeg_start_time=eeg_start_time,
+            eeg_end_time=eeg_end_time,
+            icon_images=c.ICON_IMAGES,
+            img_size=c.IMG_SIZE,
+            stim_pos=stimulus_positions,
+            chans_pos_xy=chans_pos_xy,
+            ch_group_inds=ch_group_inds,
+            group_colors=group_colors,
+            screen_resolution=c.SCREEN_RESOLUTION,
+            title=plot_title,
+            vlines=[
+                eeg_baseline * c.EEG_SFREQ,
+                eeg_baseline * c.EEG_SFREQ + fixation_duration * c.EEG_SFREQ,
+            ],
+        )
+
+    def get_trial_frp(
+        self,
+        eeg_trial: mne.io.Raw,
+        et_trial: mne.io.eyelink.eyelink.RawEyelink,
+        raw_behav: pd.DataFrame,
+        trial_N: int,
+        stim_scope: Literal["sequence", "choices", "both"] = "sequence",
+        tmin: float = -0.100,
+        tmax: float = 0.600,
+        baseline: tuple[float | None, float | None] | None = None,
+        selected_chans: list[str] | str | None = "eeg",
+        min_fixation_duration: float | None = None,
+        return_epochs: bool = False,
+    ) -> mne.Evoked | None | tuple[mne.Evoked | None, mne.EpochsArray | None]:
+        """Compute one trial-level FRP from fixations on selected stimuli.
+
+        The method finds valid fixation events on sequence icons, choice icons,
+        or both, extracts EEG windows around fixation onset, concatenates those
+        fixation-locked epochs, and returns their average.
+        """
+        if tmax <= tmin:
+            raise ValueError("tmax must be larger than tmin")
+        assert c.EEG_SFREQ == eeg_trial.info["sfreq"], (
+            "EEG data has incorrect sampling rate"
+        )
+
+        min_fixation_duration = (
+            c.MIN_FIXATION_DURATION
+            if min_fixation_duration is None
+            else min_fixation_duration
+        )
+
+        cropped_et_trial, et_annotations, time_bounds = self.crop_et_trial(et_trial)
+        eeg_crop_start_time = max(eeg_trial.times[0], time_bounds[0] + min(tmin, 0))
+        eeg_crop_stop_time = min(eeg_trial.times[-1], time_bounds[1] + max(tmax, 0))
+        cropped_eeg_trial = eeg_trial.copy().crop(
+            tmin=eeg_crop_start_time,
+            tmax=eeg_crop_stop_time,
+        )
+
+        (
+            stimulus_positions,
+            _,
+            sequence_items,
+            choice_items,
+            *_,
+        ) = get_trial_info(
+            trial_N,
+            raw_behav,
+            c.X_POS_STIM,
+            c.Y_POS_CHOICES,
+            c.Y_POS_SEQUENCE,
+            c.SCREEN_RESOLUTION,
+            c.IMG_SIZE,
+        )
+        selected_stim_inds = set(
+            self._stim_inds_for_scope(stim_scope, sequence_items, choice_items)
+        )
+
+        et_data = cropped_et_trial.get_data()
+        et_times = cropped_et_trial.times
+        eeg_data = cropped_eeg_trial.get_data(picks=selected_chans)
+        eeg_info = (
+            cropped_eeg_trial.info
+            if selected_chans is None
+            else cropped_eeg_trial.copy().pick(selected_chans).info
+        )
+        sfreq = float(cropped_eeg_trial.info["sfreq"])
+        n_epoch_samples = int(np.ceil((tmax - tmin) * sfreq)) + 1
+        epoch_arrays = []
+
+        for fixation_ind in et_annotations.query("description == 'fixation'").index:
+            fixation = et_annotations.loc[fixation_ind]
+            fixation_onset = float(fixation["onset"])
+            fixation_duration = float(fixation["duration"])
+            fixation_offset = min(fixation_onset + fixation_duration, et_times[-1])
+
+            et_start_sample = int(
+                np.searchsorted(et_times, fixation_onset, side="left")
+            )
+            et_stop_sample = int(
+                np.searchsorted(et_times, fixation_offset, side="right")
+            )
+            if et_stop_sample <= et_start_sample:
+                continue
+
+            gaze_x, gaze_y = et_data[:2, et_start_sample:et_stop_sample]
+            on_target, stim_ind = self.is_fixation_on_target(
+                gaze_x, gaze_y, stimulus_positions
+            )
+            if (
+                not on_target
+                or stim_ind not in selected_stim_inds
+                or fixation_duration < min_fixation_duration
+            ):
+                continue
+
+            fixation_onset_in_eeg_crop = (
+                time_bounds[0] + fixation_onset - eeg_crop_start_time
+            )
+            eeg_window_start_sample = int(
+                np.round((fixation_onset_in_eeg_crop + tmin) * sfreq)
+            )
+            eeg_window_stop_sample = eeg_window_start_sample + n_epoch_samples
+            if (
+                eeg_window_start_sample < 0
+                or eeg_window_stop_sample > eeg_data.shape[1]
+            ):
+                logger.warning(
+                    "Skipping trial FRP fixation window beyond trial bounds "
+                    f"(subj={self.subj_N:02}, sess={self.sess_N:02}, "
+                    f"trial={trial_N}, onset={fixation_onset:.3f}, "
+                    f"tmin={tmin:.3f}, tmax={tmax:.3f})."
+                )
+                continue
+            epoch_arrays.append(
+                eeg_data[:, eeg_window_start_sample:eeg_window_stop_sample]
+            )
+
+        if not epoch_arrays:
+            return (None, None) if return_epochs else None
+
+        fixation_epochs = mne.EpochsArray(
+            np.stack(epoch_arrays),
+            eeg_info,
+            tmin=tmin,
+            baseline=baseline,
+            verbose="WARNING",
+        )
+        trial_frp = fixation_epochs.average()
+        if return_epochs:
+            return trial_frp, fixation_epochs
+        return trial_frp
+
     def analyze_trial_decision_period(
         self,
         eeg_trial: mne.io.Raw,
@@ -2295,101 +2720,45 @@ class HumanSessData(HumanDataClass):
         trial_N: int,
         eeg_baseline: float = 0.100,
         eeg_window: float = 0.600,
+        frp_baseline: tuple[float | None, float | None] | None = None,
         show_plots: bool = True,
         pbar_off=True,
     ):
         """
-        This function uses the Eye Tracker's label to identify fixation events
+        Analyze valid stimuli fixations during the trial decision period.
+
+        The method first extracts lightweight fixation metadata and gaze traces,
+        then builds fixation-locked EEG epochs in batches grouped by stimuli. This
+        avoids repeated Raw.copy().crop() and one-EpochsArray-per-fixation work.
         """
-
-        # # ! TEMP
-        # eeg_baseline: float = 0.100
-        # eeg_window: float = 0.600
-        # show_plots = False
-        # pbar_off =False
-
-        # s0102 = HumanSessData(c.DATA_DIR, c.PREPROCESSED_DIR, c.EXPORT_DIR, 1, 2)
-        # self = s0102
-        # sess_info, raw_behav, raw_eeg, raw_et, et_cals = self.get_data()
-
-        # (
-        #     manual_et_trials,
-        #     *_,
-        #     # et_events_dict,
-        #     # et_events_dict_inv,
-        #     # et_trial_bounds,
-        #     # et_trial_events_df,
-        # ) = self.split_et_data_into_trials(raw_et, et_cals)
-
-        # (
-        #     manual_eeg_trials,
-        #     *_,
-        #     # eeg_trial_bounds,
-        #     # eeg_events,
-        #     # eeg_events_df,
-        # ) = self.split_eeg_data_into_trials(raw_eeg, raw_behav)
-
-        # bad_chans = raw_eeg.info["bads"]
-
-        # # * Initialize data containers
-        # sess_frps: Dict[str, List] = {"sequence": [], "choices": []}
-        # fixation_data_all = []
-        # eeg_fixation_data_all = []
-        # gaze_info_all = []
-        # gaze_target_fixation_sequence_all = []
-        # eeg_fixation_pac_data_all = []
-
-        # manual_et_trials = list(manual_et_trials)
-        # manual_eeg_trials = list(manual_eeg_trials)
-        # trial_N = 45
-        # eeg_trial = manual_eeg_trials[trial_N]
-        # et_trial = manual_et_trials[trial_N]
-        # # ! TEMP
-
-        # * ########################################
-        # * "GLOBAL" VARIABLES
-        # * ########################################
-
-        # * Define frequency bands for Phase-Amplitude Coupling (PAC) analysis
-        theta_band = [4, 7]  # Theta band: 4-7 Hz
-        alpha_band = [8, 13]  # Alpha band: 8-13 Hz
-
-        # * Get channel indices for PAC analysis
-        picked_chs_pac = mne.pick_channels(
-            eeg_trial.ch_names,
-            include=c.EEG_CHAN_GROUPS.frontal,
-            exclude=eeg_trial.info["bads"],
-        )
-
-        # * ########################################
-
         assert c.EEG_SFREQ == eeg_trial.info["sfreq"], (
             "EEG data has incorrect sampling rate"
         )
 
-        # * Crop the data
-        et_trial, et_annotations, time_bounds = self.crop_et_trial(et_trial)
+        cropped_et_trial, et_annotations, time_bounds = self.crop_et_trial(et_trial)
+        eeg_crop_start_time = max(eeg_trial.times[0], time_bounds[0] - eeg_baseline)
+        eeg_crop_stop_time = min(eeg_trial.times[-1], time_bounds[1] + eeg_window)
+        cropped_eeg_trial = eeg_trial.copy().crop(
+            tmin=eeg_crop_start_time,
+            tmax=eeg_crop_stop_time,
+        )
 
-        # * Adjust time bounds for EEG baseline and window
-        # * Cropping with sample bounds
-        trial_duration = (time_bounds[1] + eeg_window + eeg_baseline) - time_bounds[0]
-        sample_bounds = [0, 0]
-        sample_bounds[0] = int(time_bounds[0] * c.EEG_SFREQ)
-        sample_bounds[1] = sample_bounds[0] + int(np.ceil(trial_duration * c.EEG_SFREQ))
+        eeg_data = cropped_eeg_trial.get_data()
+        eeg_info = cropped_eeg_trial.info
+        n_epoch_samples = int(np.ceil((eeg_window + eeg_baseline) * c.EEG_SFREQ)) + 1
 
-        eeg_trial = eeg_trial.copy().crop(
-            eeg_trial.times[sample_bounds[0]], eeg_trial.times[sample_bounds[1]]
-        )  # TODO: Select only good channels here?
+        et_data = cropped_et_trial.get_data()
+        et_times = cropped_et_trial.times
 
-        # * Get channel positions for topomap
-        eeg_info = eeg_trial.info
-
-        chans_pos_xy = np.array(
-            list(eeg_info.get_montage().get_positions()["ch_pos"].values())
-        )[:, :2]
-
-        # * Get info on the current trial
-        stim_pos, stim_order, sequence, choices, _, solution, _ = get_trial_info(
+        (
+            stimulus_positions,
+            stimulus_order,
+            sequence_items,
+            choice_items,
+            _,
+            solution,
+            _,
+        ) = get_trial_info(
             trial_N,
             raw_behav,
             c.X_POS_STIM,
@@ -2399,353 +2768,172 @@ class HumanSessData(HumanDataClass):
             c.IMG_SIZE,
         )
 
-        solution_ind = {v: k for k, v in choices.items()}[solution]
-
-        # * Get the onset of the response event
         response_onset = et_annotations.query(
             "description.isin(['a', 'x', 'm', 'l', 'timeout', 'invalid'])"
         ).iloc[0]["onset"]
 
-        seq_and_choices = sequence.copy()
-        seq_and_choices.update({k + len(sequence): v for k, v in choices.items()})
+        stim_labels = sequence_items.copy()
+        stim_labels.update(
+            {k + len(sequence_items): v for k, v in choice_items.items()}
+        )
+        sequence_stim_inds = list(sequence_items.keys())
+        choice_stim_inds = [i + len(sequence_items) for i in choice_items.keys()]
+        solution_stim_ind = {v: k for k, v in choice_items.items()}[solution]
+        solution_stim_ind += len(sequence_items)
+        stimulus_types = self._stimulus_type_map(
+            stim_labels, sequence_items, solution_stim_ind
+        )
 
-        # * Get the indices of the icons, reindex choices to simplify analysis
-        sequence_icon_inds = list(sequence.keys())
-        choice_icon_inds = [i + len(sequence) for i in choices.keys()]
-        solution_ind += len(sequence)
-        # wrong_choice_icon_inds = [i for i in choice_icon_inds if i != solution_ind]
-
-        # * Get the types of stimuli (e.g., choice related or unrelated to the sequence)
-        stim_types = {}
-        for i, icon_name in seq_and_choices.items():
-            if i < 7:
-                stim_types[i] = "sequence"
-            elif i == 7:
-                stim_types[i] = "question_mark"
-            else:
-                if i == solution_ind:
-                    stim_types[i] = "choice_correct"
-                else:
-                    if icon_name in sequence.values():
-                        stim_types[i] = "choice_incorrect_related"
-                    else:
-                        stim_types[i] = "choice_incorrect_unrelated"
-
-        # * Indices of every gaze fixation event
         fixation_inds = et_annotations.query("description == 'fixation'").index
+        gaze_traces_by_stim: dict[int, list[np.ndarray]] = {
+            i: [] for i in range(len(stimulus_order))
+        }
+        eeg_arrays_by_stim: dict[int, list[np.ndarray]] = {
+            i: [] for i in range(len(stimulus_order))
+        }
+        valid_fixation_rows = []
 
-        # * Initialize data containers
-        gaze_target_fixation_sequence = []
-        fixation_data: dict = {i: [] for i in range(len(stim_order))}
-        eeg_fixation_data: dict = {i: [] for i in range(len(stim_order))}
-        # eeg_fixation_pac_data: dict = {i: [] for i in range(len(stim_order))}
+        plot_context = None
+        if show_plots:
+            channel_group_names = [
+                "frontal",
+                "parietal",
+                "central",
+                "temporal",
+                "occipital",
+            ]
+            channel_group_colors = ["red", "green", "blue", "pink", "orange"]
+            plot_context = prepare_eeg_data_for_plot(
+                c.EEG_CHAN_GROUPS,
+                c.EEG_MONTAGE,
+                c.NON_EEG_CHANS,
+                cropped_eeg_trial.info["bads"],
+                channel_group_names,
+                channel_group_colors,
+            )
 
-        # TODO: get heatmap of fixation data
-        # * Loop through each fixation event
         pbar = tqdm(fixation_inds, leave=False, disable=pbar_off)
 
-        for idx_fix, fixation_ind in enumerate(pbar):
-            # * Get number of flash events before the current fixation; -1 to get the index
+        for fixation_ind in pbar:
             fixation = et_annotations.loc[fixation_ind]
+            fixation_onset = float(fixation["onset"])
+            fixation_duration = float(fixation["duration"])
+            fixation_offset = min(fixation_onset + fixation_duration, et_times[-1])
 
-            # * Get fixation start and end time, and duration
-            fixation_start = fixation["onset"]
-            fixation_duration = fixation["duration"]
-            fixation_end = fixation_start + fixation_duration
+            et_start_sample = int(
+                np.searchsorted(et_times, fixation_onset, side="left")
+            )
+            et_stop_sample = int(
+                np.searchsorted(et_times, fixation_offset, side="right")
+            )
+            if et_stop_sample <= et_start_sample:
+                continue
 
-            # * Make sure we don't go beyond the end of the trial, crop the data if needed
-            end_time = min(fixation_end, et_trial.times[-1])
-
-            # * Get gaze positions and pupil diameter during the fixation period
-            gaze_x, gaze_y, pupil_diam = (
-                et_trial.copy().crop(fixation_start, end_time).get_data()
+            gaze_x, gaze_y, pupil_diameter = et_data[:, et_start_sample:et_stop_sample]
+            on_target, stim_ind = self.is_fixation_on_target(
+                gaze_x, gaze_y, stimulus_positions
             )
 
-            # * Determine if gaze is on target
-            on_target, target_ind = self.is_fixation_on_target(gaze_x, gaze_y, stim_pos)
-
-            # * Get EEG data during the fixation period
-            # * Convert time bounds to sample bounds
-            eeg_start_sample = int(fixation_start * c.EEG_SFREQ)
-            eeg_end_sample = eeg_start_sample + int(
-                np.ceil((eeg_window + eeg_baseline) * c.EEG_SFREQ)
+            fixation_is_valid = (
+                fixation_duration >= c.MIN_FIXATION_DURATION and on_target
             )
-
-            # * Convert EEG sample bounds back to time bounds
-            eeg_start_time = eeg_trial.times[eeg_start_sample]
-            eeg_end_time = eeg_trial.times[eeg_end_sample]
-            # eeg_duration = eeg_end_time - eeg_start_time
-
-            # ! Epoching on eeg_trial as epoching with MNE epochs object results in a
-            # ! lot of epochs being dropped automatically by MNE, so we'll use the raw
-            # ! data and crop it manually then convert it to an EpochsArray object
-            # * Crop by sample bounds
-            eeg_slice = eeg_trial.copy().crop(eeg_start_time, eeg_end_time).get_data()
-
-            eeg_slice = mne.EpochsArray(
-                [eeg_slice], eeg_trial.info, tmin=-eeg_baseline, verbose="WARNING"
-            )
-
-            # * Apply baseline correction and detrend
-            eeg_slice = eeg_slice.apply_baseline(baseline=(None, 0), verbose="WARNING")
-            # TODO: This assignment does not actually detrend the data. If detrending is
-            # needed, pass detrend=1 when creating the Epochs/EpochsArray or apply an
-            # explicit MNE-compatible detrending step here.
-            eeg_slice.detrend = 1
-
-            # * Check if fixation is on target and duration is above minimum
-            if fixation_duration >= c.MIN_FIXATION_DURATION and on_target:
-                # if on_target:
-                discarded = False
-
-                fixation_data[target_ind].append(np.array([gaze_x, gaze_y]))
-
-                gaze_target_fixation_sequence.append(
-                    [target_ind, fixation_start, fixation_duration, pupil_diam.mean()]
+            absolute_fixation_onset = time_bounds[0] + fixation_onset
+            eeg_fixation_start_sample = int(
+                np.round(
+                    (absolute_fixation_onset - eeg_baseline - eeg_crop_start_time)
+                    * c.EEG_SFREQ
                 )
+            )
+            eeg_fixation_stop_sample = eeg_fixation_start_sample + n_epoch_samples
+            eeg_epoch_array = None
 
-                eeg_fixation_data[target_ind].append(eeg_slice)
+            if (
+                0 <= eeg_fixation_start_sample
+                and eeg_fixation_stop_sample <= eeg_data.shape[1]
+            ):
+                eeg_epoch_array = eeg_data[
+                    :, eeg_fixation_start_sample:eeg_fixation_stop_sample
+                ]
+            elif fixation_is_valid:
+                logger.warning(
+                    "Skipping fixation EEG window beyond trial bounds "
+                    f"(subj={self.subj_N:02}, sess={self.sess_N:02}, "
+                    f"trial={trial_N}, onset={fixation_onset:.3f})."
+                )
+                fixation_is_valid = False
 
-            else:
-                # * Only for visualization purposes
-                discarded = True
+            if fixation_is_valid:
+                gaze_traces_by_stim[stim_ind].append(np.array([gaze_x, gaze_y]))
+                eeg_arrays_by_stim[stim_ind].append(eeg_epoch_array)
+                valid_fixation_rows.append(
+                    [
+                        stim_ind,
+                        fixation_onset,
+                        fixation_duration,
+                        np.nanmean(pupil_diameter),
+                    ]
+                )
 
             if show_plots:
-                # * Select EEG channel groups to plot
-                ch_group_names = [
-                    "frontal",
-                    "parietal",
-                    "central",
-                    "temporal",
-                    "occipital",
-                ]
-                ch_group_colors = ["red", "green", "blue", "pink", "orange"]
-
-                selected_chans_names, ch_group_inds, group_colors, chans_pos_xy = (
-                    prepare_eeg_data_for_plot(
-                        c.EEG_CHAN_GROUPS,
-                        c.EEG_MONTAGE,
-                        c.NON_EEG_CHANS,
-                        eeg_trial.info["bads"],
-                        ch_group_names,
-                        ch_group_colors,
-                    )
-                )
-
-                title = f"ICON-{target_ind}" if on_target else "OFF-TARGET"
-                title += f" ({fixation_duration * 1000:.0f} ms)"
-                title += " - " + ("DISCARDED" if discarded else "SAVED")
-
-                # fig = plot_eeg_and_gaze_fixations_plotly(
-                plot_eeg_and_gaze_fixations(
-                    # * Convert to microvolts
-                    # eeg_data=eeg_slice * 1e6,
-                    eeg_data=eeg_slice.get_data(picks="eeg", units="uV")[0],  # * 1e6,
-                    eeg_sfreq=c.EEG_SFREQ,
-                    et_data=np.stack([gaze_x, gaze_y], axis=1).T,
+                self._plot_fixation_window(
+                    eeg_epoch_array=eeg_epoch_array,
+                    eeg_info=eeg_info,
+                    cropped_eeg_trial=cropped_eeg_trial,
+                    fixation_is_valid=fixation_is_valid,
+                    on_target=on_target,
+                    stim_ind=stim_ind,
+                    fixation_duration=fixation_duration,
+                    eeg_fixation_start_sample=eeg_fixation_start_sample,
+                    eeg_fixation_stop_sample=eeg_fixation_stop_sample,
+                    gaze_x=gaze_x,
+                    gaze_y=gaze_y,
                     eeg_baseline=eeg_baseline,
                     response_onset=response_onset,
-                    eeg_start_time=eeg_start_time,
-                    eeg_end_time=eeg_end_time,
-                    icon_images=c.ICON_IMAGES,
-                    img_size=c.IMG_SIZE,
-                    stim_pos=stim_pos,
-                    chans_pos_xy=chans_pos_xy,
-                    ch_group_inds=ch_group_inds,
-                    group_colors=group_colors,
-                    screen_resolution=c.SCREEN_RESOLUTION,
-                    title=title,
-                    vlines=[
-                        eeg_baseline * c.EEG_SFREQ,
-                        eeg_baseline * c.EEG_SFREQ + fixation_duration * c.EEG_SFREQ,
-                    ],
+                    stimulus_positions=stimulus_positions,
+                    plot_context=plot_context,
                 )
-
-                # plt.savefig(
-                #     wd
-                #     / f"subj_{subj_N:02}-sess_{sess_N:02}-trial_{epoch_N:02}-fixation{idx_fix:02}.png"
-                # )
         plt.close("all")
 
-        # * Getting Fixation Related Potentials (FRPs)
-        # * FRPs here correspond to the average EEG signal during fixations on each icon
+        eeg_epochs_by_stim = self._epochs_by_stim(
+            eeg_arrays_by_stim, eeg_info, eeg_baseline
+        )
+        fixations_sequence_erp = self.get_trial_frp(
+            eeg_trial=eeg_trial,
+            et_trial=et_trial,
+            raw_behav=raw_behav,
+            trial_N=trial_N,
+            stim_scope="sequence",
+            tmin=-eeg_baseline,
+            tmax=eeg_window,
+            baseline=frp_baseline,
+            selected_chans="eeg",
+        )
+        fixations_choices_erp = self.get_trial_frp(
+            eeg_trial=eeg_trial,
+            et_trial=et_trial,
+            raw_behav=raw_behav,
+            trial_N=trial_N,
+            stim_scope="choices",
+            tmin=-eeg_baseline,
+            tmax=eeg_window,
+            baseline=frp_baseline,
+            selected_chans="eeg",
+        )
 
-        # * Concatenate all fixations on each icon
-        eeg_fixation_data = {
-            target_ind: mne.concatenate_epochs(data, verbose="WARNING")
-            for target_ind, data in eeg_fixation_data.items()
-            if len(data) > 0
-        }
-
-        # * Concat all fixations on each icon from the sequence (top row in experiment)
-        eeg_fixations_sequence = {
-            k: v
-            for k, v in eeg_fixation_data.items()
-            if k in sequence_icon_inds and len(v) > 0
-        }
-
-        # * Concat all fixations on each icon from the choices (bottom row in experiment)
-        eeg_fixations_choices = {
-            k: v
-            for k, v in eeg_fixation_data.items()
-            if k in choice_icon_inds and len(v) > 0
-        }
-
-        # * Calculate ERPs to fixations on sequence icons
-        if len(eeg_fixations_sequence) > 0:
-            fixations_sequence_erp = mne.concatenate_epochs(
-                list(eeg_fixations_sequence.values()), verbose="WARNING"
-            ).average()
-        else:
-            # fixations_sequence_erp = np.array([])
-            fixations_sequence_erp = None
-
-        # * Calculate ERPs to fixations on choice icons
-        if len(eeg_fixations_choices) > 0:
-            fixations_choices_erp = mne.concatenate_epochs(
-                list(eeg_fixations_choices.values()), verbose="WARNING"
-            ).average()
-        else:
-            # fixations_choices_erp = np.array([])
-            fixations_choices_erp = None
-
-        # * Compute Phase-Amplitude Coupling (PAC)
         eeg_fixation_pac_data = {}
-        # for target_ind, mne_data in eeg_fixation_data.items():
-        #     # TODO: check which one to use for phase and amplitude
-        #     pac, _ = self.analyze_phase_coupling(
-        #         mne_data.get_data(picks=picked_chs_pac),
-        #         sfreq=c.EEG_SFREQ,
-        #         f_pha=theta_band,
-        #         f_amp=alpha_band,
-        #     )
-        #     eeg_fixation_pac_data[target_ind] = pac
-
-        # * ########################################
-        # * GAZE ANALYSIS
-        # * ########################################
-        cols = ["target_ind", "onset", "duration", "pupil_diam"]
-
-        gaze_target_fixation_sequence_df = pd.DataFrame(
-            gaze_target_fixation_sequence,
+        fixation_events = self._fixation_events_table(
+            valid_fixation_rows, trial_N, stim_labels, stimulus_types
         )
-        del gaze_target_fixation_sequence
-
-        if len(gaze_target_fixation_sequence_df) == 0:
-            gaze_target_fixation_sequence_df = pd.DataFrame(
-                [[pd.NA for _ in range(len(cols))]]
-            )
-
-        gaze_target_fixation_sequence_df.columns = cols
-
-        gaze_target_fixation_sequence_df["trial_N"] = trial_N
-
-        gaze_target_fixation_sequence_df["stim_name"] = (
-            gaze_target_fixation_sequence_df["target_ind"].replace(seq_and_choices)
+        stim_fixation_summary = self._stim_fixation_summary(
+            fixation_events, trial_N, stim_labels, stimulus_types
         )
-
-        # gaze_target_fixation_sequence_df["pupil_diam"] = (
-        #     gaze_target_fixation_sequence_df["pupil_diam"].round(2)
-        # )
-
-        gaze_target_fixation_sequence_df["stim_type"] = (
-            gaze_target_fixation_sequence_df["target_ind"].replace(stim_types)
-        )
-
-        first_fixation_order = (
-            gaze_target_fixation_sequence_df.sort_values("onset")
-            .groupby("target_ind")
-            .first()["onset"]
-            .rank()
-            .astype(int)
-        )
-
-        first_fixation_order.name = "first_fix_order"
-
-        # gaze_target_fixation_sequence_df["pupil_diam"] = (
-        #     gaze_target_fixation_sequence_df["pupil_diam"].round(2)
-        # )
-
-        # mean_duration_per_target = (
-        #     gaze_target_fixation_sequence_df.groupby("target_ind")["duration"]
-        #     .mean()
-        #     .round(2)
-        # )
-
-        # mean_diam_per_target = (
-        #     gaze_target_fixation_sequence_df.groupby("target_ind")["pupil_diam"]
-        #     .mean()
-        #     .round()
-        # )
-
-        # * Apply pd.to_numeric() here to ensure the data type is numeric
-        gaze_target_fixation_sequence_df["duration"] = pd.to_numeric(
-            gaze_target_fixation_sequence_df["duration"], errors="coerce"
-        )
-        gaze_target_fixation_sequence_df["pupil_diam"] = pd.to_numeric(
-            gaze_target_fixation_sequence_df["pupil_diam"], errors="coerce"
-        ).round(2)
-
-        mean_duration_per_target = gaze_target_fixation_sequence_df.groupby(
-            "target_ind"
-        )["duration"].mean()
-
-        mean_diam_per_target = gaze_target_fixation_sequence_df.groupby("target_ind")[
-            "pupil_diam"
-        ].mean().round(2)
-
-        fix_counts_per_target = gaze_target_fixation_sequence_df[
-            "target_ind"
-        ].value_counts()
-
-        total_fix_duration_per_target = gaze_target_fixation_sequence_df.groupby(
-            "target_ind"
-        )["duration"].sum()
-
-        mean_duration_per_target.name = "mean_duration"
-        mean_diam_per_target.name = "mean_pupil_diam"
-        total_fix_duration_per_target.name = "total_duration"
-
-        mean_diam_per_target.sort_values(ascending=False, inplace=True)
-        fix_counts_per_target.sort_values(ascending=False, inplace=True)
-        total_fix_duration_per_target.sort_values(ascending=False, inplace=True)
-
-        gaze_info = pd.concat(
-            [
-                fix_counts_per_target,
-                first_fixation_order,
-                total_fix_duration_per_target,
-                mean_duration_per_target,
-                mean_diam_per_target,
-            ],
-            axis=1,
-        ).reset_index()
-
-        gaze_info["stim_name"] = gaze_info["target_ind"].replace(seq_and_choices)
-        gaze_info["trial_N"] = trial_N
-        gaze_info["stim_type"] = gaze_info["target_ind"].replace(stim_types)
-        gaze_info.sort_values("target_ind", inplace=True)
-
-        # gaze_info.query("target_ind in @sequence_icon_inds")
-        # gaze_info.query("target_ind == @choice_icon_inds")
-        # gaze_info.query("target_ind == @wrong_choice_icon_inds")
-        # gaze_info.query("target_ind == @solution_ind")
-
-        # gaze_info
-
-        # gaze_target_fixation_sequence.query("target_ind == @sequence_icon_inds").groupby(
-        #     "target_ind"
-        # )["duration"].mean().plot(kind="bar")
-        # gaze_target_fixation_sequence["duration"].plot()
-        # gaze_target_fixation_sequence["pupil_diam"].plot()
-        # gaze_target_fixation_sequence.groupby("target_ind")["pupil_diam"].plot()
 
         return (
-            fixation_data,
-            eeg_fixation_data,
+            gaze_traces_by_stim,
+            eeg_epochs_by_stim,
             eeg_fixation_pac_data,
-            gaze_target_fixation_sequence_df,
-            gaze_info,
+            fixation_events,
+            stim_fixation_summary,
             fixations_sequence_erp,
             fixations_choices_erp,
         )
@@ -2988,12 +3176,14 @@ class HumanSessData(HumanDataClass):
 
     def analyze_session(
         self,
-        save_dir: Path,
-        preprocessed_dir: Path,
+        save_dir: Path | None = None,
+        preprocessed_dir: Path | None = None,
         force_preprocess: bool = False,
         reuse_ica: bool = True,
         raise_error: bool = True,
         pbar: bool = True,
+        trial_pbar: Any | None = None,
+        frp_baseline: tuple[float | None, float | None] | None = None,
     ):
         """ """
         # # ! TEMP: DEBUG
@@ -3008,7 +3198,14 @@ class HumanSessData(HumanDataClass):
         # raise_error: bool = False
         # # ! TEMP: DEBUG
 
-        save_dir.mkdir(exist_ok=True, parents=True)
+        should_save = save_dir is not None
+        if should_save:
+            save_dir = Path(save_dir)
+            save_dir.mkdir(exist_ok=True, parents=True)
+
+        if preprocessed_dir is None:
+            preprocessed_dir = self.preprocessed_dir
+        preprocessed_dir = Path(preprocessed_dir)
 
         if not preprocessed_dir.exists():
             raise FileNotFoundError("Preprocessed data directory not found")
@@ -3027,7 +3224,7 @@ class HumanSessData(HumanDataClass):
                 raise ValueError("Bad session")
             else:
                 print("Bad session, skipping...")
-                return [None] * len(data)
+                return {}
 
         sess_info, behav, eeg, et = data
 
@@ -3071,25 +3268,33 @@ class HumanSessData(HumanDataClass):
 
         # * Initialize data containers
         sess_frps: Dict[str, List] = {"sequence": [], "choices": []}
-        fixation_data_all = []
-        eeg_fixation_data_all = []
-        gaze_info_all = []
-        gaze_target_fixation_sequence_all = []
+        gaze_fixation_traces_all = []
+        eeg_fixation_epochs_all = []
+        stim_fixation_summary_all = []
+        fixation_events_all = []
         eeg_fixation_pac_data_all = []
 
-        for trial_N in tqdm(
-            behav.index, desc="Analyzing every trial", leave=False, disable=not pbar
-        ):
+        if trial_pbar is not None:
+            trial_iter = behav.index
+            trial_pbar.reset(total=len(behav.index))
+            trial_pbar.set_description(f"subj {subj_N:02} sess {sess_N:02} trials")
+            trial_pbar.refresh()
+        else:
+            trial_iter = tqdm(
+                behav.index, desc="Analyzing every trial", leave=False, disable=not pbar
+            )
+
+        for trial_N in trial_iter:
             # * Get the EEG and ET data for the current trial
             eeg_trial = next(manual_eeg_trials)
             et_trial = next(manual_et_trials)
 
             (
-                fixation_data,
-                eeg_fixation_data,
+                gaze_fixation_traces,
+                eeg_fixation_epochs,
                 eeg_fixation_pac_data,
-                gaze_target_fixation_sequence,
-                gaze_info,
+                fixation_events,
+                stim_fixation_summary,
                 fixations_sequence_erp,
                 fixations_choices_erp,
             ) = self.analyze_trial_decision_period(
@@ -3099,29 +3304,60 @@ class HumanSessData(HumanDataClass):
                 trial_N,
                 eeg_baseline=c.EEG_BASELINE_FRP,
                 eeg_window=c.FRP_WINDOW,
+                frp_baseline=frp_baseline,
                 show_plots=False,
             )
 
             sess_frps["sequence"].append(fixations_sequence_erp)
             sess_frps["choices"].append(fixations_choices_erp)
-            fixation_data_all.append(fixation_data)
-            eeg_fixation_data_all.append(eeg_fixation_data)
-            gaze_info_all.append(gaze_info)
-            gaze_target_fixation_sequence_all.append(gaze_target_fixation_sequence)
+            gaze_fixation_traces_all.append(gaze_fixation_traces)
+            eeg_fixation_epochs_all.append(eeg_fixation_epochs)
+            stim_fixation_summary_all.append(stim_fixation_summary)
+            fixation_events_all.append(fixation_events)
             eeg_fixation_pac_data_all.append(eeg_fixation_pac_data)
+            if trial_pbar is not None:
+                trial_pbar.update(1)
 
         # ic(len(eeg_fixation_pac_data_all))
 
-        # * Concatenate the gaze data
-        gaze_info = pd.concat([df for df in gaze_info_all if df.shape[0] > 0])
-        gaze_info.reset_index(drop=True, inplace=True)
+        # * Concatenate fixation summary tables
+        stim_fixation_summary_tables = [
+            df for df in stim_fixation_summary_all if df.shape[0] > 0
+        ]
+        if stim_fixation_summary_tables:
+            stim_fixation_summary = pd.concat(stim_fixation_summary_tables)
+        else:
+            stim_fixation_summary = pd.DataFrame(
+                columns=[
+                    "stim_ind",
+                    "count",
+                    "first_fix_order",
+                    "total_duration",
+                    "mean_duration",
+                    "mean_pupil_diam",
+                    "stim_name",
+                    "trial_N",
+                    "stim_type",
+                ]
+            )
+        stim_fixation_summary.reset_index(drop=True, inplace=True)
 
-        gaze_target_fixation_sequence = pd.concat(
-            [df for df in gaze_target_fixation_sequence_all if df.shape[0] > 0]
-        )
-        gaze_target_fixation_sequence.reset_index(
-            drop=False, inplace=True, names=["fixation_N"]
-        )
+        fixation_event_tables = [df for df in fixation_events_all if df.shape[0] > 0]
+        if fixation_event_tables:
+            fixation_events = pd.concat(fixation_event_tables)
+        else:
+            fixation_events = pd.DataFrame(
+                columns=[
+                    "stim_ind",
+                    "onset",
+                    "duration",
+                    "pupil_diam",
+                    "trial_N",
+                    "stim_name",
+                    "stim_type",
+                ]
+            )
+        fixation_events.reset_index(drop=False, inplace=True, names=["fixation_N"])
 
         valid_frps = dict(
             subj_N=subj_N,
@@ -3130,31 +3366,32 @@ class HumanSessData(HumanDataClass):
             n_choices_frps=len(sess_frps["choices"]) - sess_frps["choices"].count(None),
         )
 
-        # * Save the data to pickle files
-        pd.DataFrame([valid_frps]).to_csv(save_dir / "valid_frps.csv", index=False)
+        if should_save:
+            # * Save the data to pickle files
+            pd.DataFrame([valid_frps]).to_csv(save_dir / "valid_frps.csv", index=False)
 
-        save_pickle(sess_frps, save_dir / "sess_frps.pkl")
-        save_pickle(fixation_data_all, save_dir / "fixation_data.pkl")
-        save_pickle(eeg_fixation_data_all, save_dir / "eeg_fixation_data.pkl")
-        gaze_info.to_parquet(save_dir / "gaze_info.parquet", index=False)
-        gaze_target_fixation_sequence.to_parquet(
-            save_dir / "gaze_target_fixation_sequence.parquet", index=False
-        )
-        # save_pickle(gaze_info, save_dir / "gaze_info.pkl")
-        # save_pickle(
-        #     gaze_target_fixation_sequence,
-        #     save_dir / "gaze_target_fixation_sequence.pkl",
-        # )
-        save_pickle(eeg_fixation_pac_data_all, save_dir / "eeg_fixation_pac_data.pkl")
+            save_pickle(sess_frps, save_dir / "sess_frps.pkl")
+            save_pickle(gaze_fixation_traces_all, save_dir / "gaze_fixation_traces.pkl")
+            save_pickle(eeg_fixation_epochs_all, save_dir / "eeg_fixation_epochs.pkl")
+            stim_fixation_summary.to_parquet(
+                save_dir / "stim_fixation_summary.parquet", index=False
+            )
+            fixation_events.to_parquet(
+                save_dir / "fixation_events.parquet", index=False
+            )
+            save_pickle(
+                eeg_fixation_pac_data_all, save_dir / "eeg_fixation_pac_data.pkl"
+            )
 
-        return (
-            sess_frps,
-            fixation_data,
-            eeg_fixation_data,
-            gaze_info,
-            gaze_target_fixation_sequence,
-            # eeg_fixation_pac_data_all,
-        )
+        return {
+            "sess_frps": sess_frps,
+            "gaze_fixation_traces": gaze_fixation_traces_all,
+            "eeg_fixation_epochs": eeg_fixation_epochs_all,
+            "stim_fixation_summary": stim_fixation_summary,
+            "fixation_events": fixation_events,
+            "gaze_info": stim_fixation_summary,
+            "gaze_target_fixation_sequence": fixation_events,
+        }
 
     def get_frp(self):
         raise NotImplementedError

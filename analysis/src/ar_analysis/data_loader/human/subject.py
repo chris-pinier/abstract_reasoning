@@ -38,7 +38,11 @@ class HumanSubjData(HumanDataClass):
             Subj_N: {self.subj_N}
             Sessions: {list(self.sessions.keys())}
             Data Directory: '{self.subj_dir}'
+            Preprocessed Directory: '{self.preprocessed_dir}'
+            Export Directory: '{self.export_dir}'
+            Data Format: {self.data_fmt}
         """
+        # task_name
         return textwrap.dedent(s).strip()
 
     def search_subj_dir(self):
@@ -148,8 +152,13 @@ class HumanSubjData(HumanDataClass):
             save_dir = Path(save_dir)
             save_dir.mkdir(exist_ok=True, parents=True)
 
-        prepro_eeg_files = list_contents(
-            preprocessed_dir, reg=f".*subj_{subj_N:02}.*_preprocessed-raw.fif$"
+        # prepro_eeg_files = list_contents(
+        #     preprocessed_dir, reg=f".*subj_{subj_N:02}.*_preprocessed-raw.fif$"
+        # )
+        prepro_eeg_files = sorted(
+            list_contents(
+                preprocessed_dir, reg=rf".*sub-{subj_N:02}.*_prepro.*raw.fif$"
+            )
         )
 
         if len(prepro_eeg_files) == 0:
@@ -164,7 +173,8 @@ class HumanSubjData(HumanDataClass):
         # info = None
 
         for prepro_eeg_file in prepro_eeg_files:
-            sess_N = int(prepro_eeg_file.stem.split("_")[1][2:])
+            search_match = re.search(r"_ses-(\d*)_", prepro_eeg_file.stem)
+            sess_N = int(search_match[1])
 
             prepro_eeg = mne.io.read_raw_fif(
                 prepro_eeg_file, preload=False, verbose="WARNING"
@@ -257,7 +267,7 @@ class HumanSubjData(HumanDataClass):
             patt_inds = behav_df.groupby(["pattern"]).groups
 
             info = mne.create_info(
-                ch_names=selected_chans, sfreq=self.EEG["sfreq"], ch_types="eeg"
+                ch_names=selected_chans, sfreq=self.eeg_info["sfreq"], ch_types="eeg"
             )
             sess_epochs = mne.concatenate_epochs(
                 [
@@ -327,13 +337,24 @@ class HumanSubjData(HumanDataClass):
 
     def get_trials_data(
         self,
-        preprocessed_dir: Path,
+        preprocessed_dir: Path | None = None,
         raise_error: bool = False,
         eeg_incomplete: Literal["allow", "error", "skip"] = "error",
+        pbar: bool = True,
     ):
+        if preprocessed_dir is None:
+            preprocessed_dir = self.preprocessed_dir
+        preprocessed_dir = Path(preprocessed_dir)
+
         behav, manual_et_trials, manual_eeg_trials = [], [], []
 
-        for sess_N, sess_obj in self.sessions.items():
+        session_iter = tqdm(
+            self.sessions.items(),
+            desc=f"Loading subj {self.subj_N:02} session trials",
+            total=len(self.sessions),
+            disable=not pbar,
+        )
+        for sess_N, sess_obj in session_iter:
             beh, et, eeg = sess_obj.get_trials_data(
                 preprocessed_dir=preprocessed_dir,
                 raise_error=raise_error,
@@ -633,7 +654,7 @@ class HumanSubjData(HumanDataClass):
         )
 
         info = mne.create_info(
-            ch_names=selected_chans, sfreq=self.EEG["sfreq"], ch_types="eeg"
+            ch_names=selected_chans, sfreq=self.eeg_info["sfreq"], ch_types="eeg"
         )
         eeg_epochs = mne.concatenate_epochs(
             [mne.EpochsArray(e, info, verbose="WARNING") for e in sess_epochs.values()],
@@ -736,6 +757,142 @@ class HumanSubjData(HumanDataClass):
     # * ########################################
     # * Rest of the code
     # * ########################################
+    @staticmethod
+    def _session_trial_count(sess_result: dict) -> int:
+        candidate_counts = []
+
+        sess_frps = sess_result.get("sess_frps", {})
+        if isinstance(sess_frps, dict):
+            candidate_counts.extend(
+                len(sess_frps.get(key, [])) for key in ("sequence", "choices")
+            )
+        candidate_counts.extend(
+            len(sess_result.get(key, []))
+            for key in ("gaze_fixation_traces", "eeg_fixation_epochs")
+        )
+
+        for key in ("stim_fixation_summary", "fixation_events"):
+            table = sess_result.get(key)
+            if isinstance(table, pd.DataFrame) and "trial_N" in table.columns:
+                trial_numbers = pd.to_numeric(table["trial_N"], errors="coerce")
+                if trial_numbers.notna().any():
+                    candidate_counts.append(int(trial_numbers.max()) + 1)
+
+        return max(candidate_counts, default=0)
+
+    @staticmethod
+    def _session_trial_map(sess_result: dict, trial_offset: int) -> dict[Any, int]:
+        trial_values = []
+        for key in ("stim_fixation_summary", "fixation_events"):
+            table = sess_result.get(key)
+            if isinstance(table, pd.DataFrame) and "trial_N" in table.columns:
+                trial_values.extend(table["trial_N"].dropna().tolist())
+        trial_values = sorted(pd.Series(trial_values).drop_duplicates().tolist())
+
+        trial_map = {}
+        for overall_idx, trial_N in enumerate(trial_values):
+            numeric_trial_N = pd.to_numeric(pd.Series([trial_N]), errors="coerce").iloc[
+                0
+            ]
+            if pd.notna(numeric_trial_N):
+                trial_map[trial_N] = trial_offset + int(numeric_trial_N)
+            else:
+                trial_map[trial_N] = trial_offset + overall_idx
+        return trial_map
+
+    @staticmethod
+    def _add_session_trial_columns(
+        table: pd.DataFrame,
+        sess_N: int,
+        trial_map: dict[Any, int],
+    ) -> pd.DataFrame:
+        """Add session and subject-level trial indices to a session table."""
+        table = table.copy()
+        if "sess_N" not in table.columns:
+            table.insert(0, "sess_N", sess_N)
+        else:
+            table["sess_N"] = sess_N
+
+        if "trial_N" not in table.columns:
+            return table
+
+        table.insert(
+            table.columns.get_loc("trial_N"),
+            "overall_trial_N",
+            table["trial_N"].map(trial_map),
+        )
+        return table
+
+    @classmethod
+    def _concat_session_analysis_results(
+        cls,
+        sess_results: dict[int, dict],
+    ) -> dict[str, Any]:
+        """Concatenate session-level analysis outputs into subject-level outputs."""
+        concatenated = {
+            "sess_frps": {"sequence": [], "choices": []},
+            "gaze_fixation_traces": [],
+            "eeg_fixation_epochs": [],
+            "stim_fixation_summary": pd.DataFrame(),
+            "fixation_events": pd.DataFrame(),
+            "gaze_info": pd.DataFrame(),
+            "gaze_target_fixation_sequence": pd.DataFrame(),
+        }
+
+        stim_fixation_summary_tables = []
+        fixation_event_tables = []
+        trial_offset = 0
+
+        for sess_N, sess_result in sorted(sess_results.items()):
+            if not sess_result:
+                continue
+            trial_map = cls._session_trial_map(sess_result, trial_offset)
+            trial_offset += cls._session_trial_count(sess_result)
+
+            sess_frps = sess_result.get("sess_frps", {})
+            concatenated["sess_frps"]["sequence"].extend(
+                sess_frps.get("sequence", [])
+            )
+            concatenated["sess_frps"]["choices"].extend(sess_frps.get("choices", []))
+            concatenated["gaze_fixation_traces"].extend(
+                sess_result.get("gaze_fixation_traces", [])
+            )
+            concatenated["eeg_fixation_epochs"].extend(
+                sess_result.get("eeg_fixation_epochs", [])
+            )
+
+            stim_fixation_summary = sess_result.get("stim_fixation_summary")
+            if isinstance(stim_fixation_summary, pd.DataFrame):
+                stim_fixation_summary = cls._add_session_trial_columns(
+                    stim_fixation_summary,
+                    sess_N=sess_N,
+                    trial_map=trial_map,
+                )
+                if not stim_fixation_summary.empty:
+                    stim_fixation_summary_tables.append(stim_fixation_summary)
+
+            fixation_events = sess_result.get("fixation_events")
+            if isinstance(fixation_events, pd.DataFrame):
+                fixation_events = cls._add_session_trial_columns(
+                    fixation_events,
+                    sess_N=sess_N,
+                    trial_map=trial_map,
+                )
+                if not fixation_events.empty:
+                    fixation_event_tables.append(fixation_events)
+
+        if stim_fixation_summary_tables:
+            concatenated["stim_fixation_summary"] = pd.concat(
+                stim_fixation_summary_tables, ignore_index=True
+            )
+        if fixation_event_tables:
+            concatenated["fixation_events"] = pd.concat(
+                fixation_event_tables, ignore_index=True
+            )
+        concatenated["gaze_info"] = concatenated["stim_fixation_summary"]
+        concatenated["gaze_target_fixation_sequence"] = concatenated["fixation_events"]
+
+        return concatenated
     def analyze_sessions(
         self,
         save_dir: Path | None = None,
@@ -743,25 +900,51 @@ class HumanSubjData(HumanDataClass):
         force_preprocess: bool = False,
         reuse_ica: bool = True,
         raise_error: bool = True,
+        pbar: bool = True,
+        concatenate: bool = False,
+        frp_baseline: tuple[float | None, float | None] | None = None,
     ):
-        if save_dir is None:
-            # print("using default save directory for subject-level analysis")
-            save_dir = c.EXPORT_DIR / f"subj_lvl/subj_{self.subj_N:02}"
+        should_save = save_dir is not None
+        if should_save:
+            save_dir = Path(save_dir)
             save_dir.mkdir(exist_ok=True, parents=True)
 
         if preprocessed_dir is None:
             preprocessed_dir = self.preprocessed_dir
+        preprocessed_dir = Path(preprocessed_dir)
 
         """Analyze all sessions for the subject."""
         sess_results = {}
-        for sess_N, sess_obj in self.sessions.items():
-            sess_results[sess_N] = sess_obj.analyze_session(
-                save_dir=save_dir / f"sess_{sess_N:02}",
-                preprocessed_dir=preprocessed_dir,
-                force_preprocess=force_preprocess,
-                reuse_ica=reuse_ica,
-                raise_error=raise_error,
-            )
+        sessions_iter = tqdm(
+            self.sessions.items(),
+            desc=f"Analyzing subj {self.subj_N:02} sessions",
+            total=len(self.sessions),
+            disable=not pbar,
+        )
+        trial_pbar = tqdm(
+            total=0,
+            desc="Session trials",
+            leave=False,
+            disable=not pbar,
+        )
+        try:
+            for sess_N, sess_obj in sessions_iter:
+                sess_save_dir = save_dir / f"sess_{sess_N:02}" if should_save else None
+                sess_results[sess_N] = sess_obj.analyze_session(
+                    save_dir=sess_save_dir,
+                    preprocessed_dir=preprocessed_dir,
+                    force_preprocess=force_preprocess,
+                    reuse_ica=reuse_ica,
+                    raise_error=raise_error,
+                    pbar=False,
+                    trial_pbar=trial_pbar,
+                    frp_baseline=frp_baseline,
+                )
+        finally:
+            trial_pbar.close()
+
+        if concatenate:
+            return self._concat_session_analysis_results(sess_results)
         return sess_results
 
     def get_gaze_heatmaps_from_fixation_data(self, data_dir: Path, save_dir: Path):
