@@ -18,7 +18,7 @@ def config() -> Box:
     # * ########################################
     # * GLOBAL CONFIGURATION
     # * ########################################
-    CREDENTIALS = Box(read_file(CONFIG_DIR / "credentials.toml", verbose=False))
+    # CREDENTIALS = Box(read_file(CONFIG_DIR / "credentials.toml", verbose=False))
     # notif = email_sender(CREDENTIALS.email.email, CREDENTIALS.email.password)
 
     PATTERNS = tuple(
