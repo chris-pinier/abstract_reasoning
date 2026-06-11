@@ -149,6 +149,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Exit with code 1 when --validate-conversion finds non-ok rows.",
     )
+    parser.add_argument(
+        "--openneuro-compat",
+        action="store_true",
+        help=(
+            "Patch metadata for the OpenNeuro validator, including .bidsignore "
+            "patterns for eye-tracking physio event files."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -185,6 +193,7 @@ def main() -> None:
         derivative_source_url=derivative_source_url,
         overwrite_extra_data=args.overwrite_extra_data,
         n_jobs=args.n_jobs,
+        openneuro_compat=args.openneuro_compat,
     )
     print(errors)
 

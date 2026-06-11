@@ -1599,6 +1599,7 @@ class BIDSdata:
         derivative_source_url: str | None = "../..",
         overwrite_extra_data: bool = False,
         n_jobs: int = 1,
+        openneuro_compat: bool = False,
     ):
         """Convert every subj_* directory and optionally attach extra BIDS data.
 
@@ -1606,7 +1607,8 @@ class BIDSdata:
         ``sourcedata/`` after conversion. ``derivatives_dir`` copies a
         preprocessed output directory into ``derivatives/<pipeline_name>/``.
         ``n_jobs`` controls subject-level multiprocessing; shared BIDS writes
-        are locked when ``n_jobs`` is greater than one.
+        are locked when ``n_jobs`` is greater than one. ``openneuro_compat``
+        adds validator compatibility metadata such as .bidsignore patterns.
         """
         if n_jobs < 1:
             raise ValueError("n_jobs must be >= 1.")
@@ -1677,6 +1679,14 @@ class BIDSdata:
             et_meta_path=et_meta_path,
             behav_meta_path=behav_meta_path,
         )
+
+        if openneuro_compat:
+            BIDSdata.patch_openneuro_metadata(
+                bids_root=bids_root,
+                task_name=task_name,
+                et_meta_path=et_meta_path,
+                behav_meta_path=behav_meta_path,
+            )
 
         if include_sourcedata:
             BIDSdata.include_sourcedata(

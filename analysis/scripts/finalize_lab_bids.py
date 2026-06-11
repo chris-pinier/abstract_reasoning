@@ -72,15 +72,15 @@ def main() -> None:
             mne_verbose=args.mne_verbose,
         )
 
+    BIDSdata.finalize_bids_dataset(
+        bids_root=args.bids_root,
+        task_name=args.task_name,
+        et_meta_path=args.et_meta_path,
+        behav_meta_path=args.behav_meta_path,
+    )
+
     if args.openneuro_compat:
         BIDSdata.patch_openneuro_metadata(
-            bids_root=args.bids_root,
-            task_name=args.task_name,
-            et_meta_path=args.et_meta_path,
-            behav_meta_path=args.behav_meta_path,
-        )
-    else:
-        BIDSdata.finalize_bids_dataset(
             bids_root=args.bids_root,
             task_name=args.task_name,
             et_meta_path=args.et_meta_path,
