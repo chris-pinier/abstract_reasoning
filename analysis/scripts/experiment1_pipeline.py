@@ -1153,12 +1153,16 @@ def save_subject_outputs(
 
 def discover_subject_numbers(human_data_dir: Path, data_fmt: str) -> list[int]:
     human_data_dir = Path(human_data_dir)
-    prefix = "sub-" if data_fmt == "bids" else "subj_"
+    if data_fmt == "bids":
+        pattern = re.compile(r"sub-(\d{2})$")
+    else:
+        pattern = re.compile(r"subj_(\d{2})$")
+
     subj_ns = []
-    for path in sorted(human_data_dir.glob(f"{prefix}*")):
+    for path in sorted(human_data_dir.iterdir()):
         if not path.is_dir():
             continue
-        match = re.search(r"(\d{2})", path.name)
+        match = pattern.fullmatch(path.name)
         if match:
             subj_ns.append(int(match.group(1)))
     if not subj_ns:

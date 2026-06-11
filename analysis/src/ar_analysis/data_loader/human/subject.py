@@ -57,23 +57,16 @@ class HumanSubjData(HumanDataClass):
         return subj_dir
 
     def search_sess_dirs(self):
-        # if self.data_fmt == "bids":
-        #     sess_dirs = sorted(
-        #         list_contents(
-        #             self.subj_dir, incl="folder", recurs=False, reg=r".*ses-*"
-        #         )
-        #     )
-        # else:
-        #     sess_dirs = sorted(
-        #         list_contents(
-        #             self.subj_dir, incl="folder", recurs=False, reg=r".*sess_*"
-        #         )
-        #     )
-
+        if self.data_fmt == "bids":
+            sess_pattern = re.compile(r"ses-(\d{2})$")
+        else:
+            sess_pattern = re.compile(r"sess_(\d{2})$")
         sess_dirs = sorted(
-            list_contents(self.subj_dir, incl="folder", recurs=False, reg=r".*ses.*")
+            d
+            for d in list_contents(self.subj_dir, incl="folder", recurs=False)
+            if sess_pattern.fullmatch(d.name)
         )
-        sess_Ns = [int(re.search(r"\d{2}", d.name)[0]) for d in sess_dirs]
+        sess_Ns = [int(sess_pattern.fullmatch(d.name).group(1)) for d in sess_dirs]
         sess_dirs = dict(zip(sess_Ns, sess_dirs))
 
         return sess_dirs

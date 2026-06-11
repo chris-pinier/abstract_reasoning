@@ -29,18 +29,24 @@ class HumanGroupData(HumanDataClass):
                 preprocessed_dir=self.preprocessed_dir,
                 export_dir=self.export_dir,
                 subj_N=subj_N,
+                data_fmt=self.data_fmt,
+                task_name=self.task_name,
             )
 
     def search_subj_Ns(self):
         if self.data_fmt == "bids":
+            subj_pattern = re.compile(r"sub-(\d{2})$")
             subj_Ns = [
-                int(f.name.split("-")[1])
+                int(match.group(1))
                 for f in list_contents(self.data_dir, incl="folder", recurs=False)
+                if (match := subj_pattern.fullmatch(f.name))
             ]
         else:
+            subj_pattern = re.compile(r"subj_(\d{2})$")
             subj_Ns = [
-                int(f.name.split("_")[1])
+                int(match.group(1))
                 for f in list_contents(self.data_dir, incl="folder", recurs=False)
+                if (match := subj_pattern.fullmatch(f.name))
             ]
         return subj_Ns
 

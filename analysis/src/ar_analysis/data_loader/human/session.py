@@ -345,9 +345,10 @@ class HumanSessData(HumanDataClass):
     def get_sess_info(self, fmt: DATA_FMTS | None = None) -> Dict:
         fmt = self.data_fmt if fmt is None else fmt
         if fmt == "bids":
+            subj_dir = self.data_dir / f"sub-{self.subj_N:02}"
             fpath = self._search_res_file(
-                directory=self.data_dir,
-                regex=f".*sub-{self.subj_N:02}.*_sessions.tsv$",
+                directory=subj_dir,
+                regex=rf".*sub-{self.subj_N:02}_sessions\.tsv$",
                 label="Sess Info",
             )
             sess_info = pd.read_csv(fpath, sep="\t", keep_default_na=False)
