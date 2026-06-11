@@ -1294,16 +1294,20 @@ class BIDSdata:
         list of failed subject-session modality tuples.
         """
         # * --- CONFIGURATION PATHS ---
-        assert et_meta_path.exists(), (
-            f"Eye-tracking BIDS metadata file not found at '{et_meta_path}'"
-        )
-        assert behav_meta_path.exists(), (
-            f"Behavioral BIDS metadata file not found at '{behav_meta_path}'"
-        )
-        assert eye2bids_exe.exists(), (
-            f"eye2bids executable not found at '{eye2bids_exe}'"
-        )
-        assert subj_dir.exists(), f"Subject directory not found at '{subj_dir}'"
+        if not et_meta_path.exists():
+            raise FileNotFoundError(
+                f"Eye-tracking BIDS metadata file not found at '{et_meta_path}'"
+            )
+        if not behav_meta_path.exists():
+            raise FileNotFoundError(
+                f"Behavioral BIDS metadata file not found at '{behav_meta_path}'"
+            )
+        if not eye2bids_exe.exists():
+            raise FileNotFoundError(
+                f"eye2bids executable not found at '{eye2bids_exe}'"
+            )
+        if not subj_dir.exists():
+            raise FileNotFoundError(f"Subject directory not found at '{subj_dir}'")
 
         subj_id = subj_dir.name.split("_")[1]
         sess_dirs = list_contents(subj_dir, recurs=False, incl="folder")
@@ -1612,6 +1616,11 @@ class BIDSdata:
         """
         if n_jobs < 1:
             raise ValueError("n_jobs must be >= 1.")
+        if not eye2bids_exe.exists():
+            raise FileNotFoundError(
+                f"eye2bids executable not found at '{eye2bids_exe}'. "
+                "Install eye2bids in the active environment or pass --eye2bids-exe."
+            )
 
         subj_dirs = list_contents(data_dir, reg="subj.+", recurs=False)
         BIDSdata._prepare_bids_root(bids_root=bids_root, task_name=task_name)

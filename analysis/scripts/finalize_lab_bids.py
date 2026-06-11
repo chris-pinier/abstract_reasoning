@@ -1,11 +1,26 @@
 from __future__ import annotations
 
 import argparse
+import shutil
+import sys
 from pathlib import Path
 
 from ar_analysis.analysis_config import Config as c
 from ar_analysis.bids_converter.bids import BIDSdata
 from ar_analysis.paths import ANALYSIS_DIR, PACKAGE_DIR
+
+
+def _default_eye2bids_exe() -> Path:
+    """Return eye2bids from the active environment, falling back to the repo venv."""
+    executable = shutil.which("eye2bids")
+    if executable is not None:
+        return Path(executable)
+
+    venv_executable = Path(sys.executable).parent / "eye2bids"
+    if venv_executable.exists():
+        return venv_executable
+
+    return ANALYSIS_DIR / ".venv" / "bin" / "eye2bids"
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--eye2bids-exe",
         type=Path,
-        default=ANALYSIS_DIR / ".venv" / "bin" / "eye2bids",
+        default=_default_eye2bids_exe(),
         help="Path to the eye2bids executable.",
     )
     parser.add_argument(

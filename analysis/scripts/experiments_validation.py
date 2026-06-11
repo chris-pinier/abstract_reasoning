@@ -5,6 +5,7 @@ import json
 import platform
 import subprocess
 import sys
+import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import matplotlib.pyplot as plt
@@ -225,20 +226,28 @@ def subject_rsa(
 
     for label1 in labels:
         for label2 in labels:
-            ds1, ds2 = match_datasets(
-                datasets[label1],
-                datasets[label2],
-                descriptor=match_descriptor,
-                drop_nan=True,
-            )
-            n_matched.loc[label1, label2] = ds1.get_measurements().shape[0]
-            rdm1 = calc_rdm_clean(ds1, dissimilarity_metric)
-            rdm2 = calc_rdm_clean(ds2, dissimilarity_metric)
-            sim_matrix.loc[label1, label2] = compare(
-                rdm1,
-                rdm2,
-                similarity_metric,
-            ).flatten().item()
+            try:
+                ds1, ds2 = match_datasets(
+                    datasets[label1],
+                    datasets[label2],
+                    descriptor=match_descriptor,
+                    drop_nan=True,
+                )
+                n_obs = ds1.get_measurements().shape[0]
+                n_matched.loc[label1, label2] = n_obs
+                if n_obs < 2:
+                    continue
+
+                rdm1 = calc_rdm_clean(ds1, dissimilarity_metric)
+                rdm2 = calc_rdm_clean(ds2, dissimilarity_metric)
+                sim_matrix.loc[label1, label2] = compare(
+                    rdm1,
+                    rdm2,
+                    similarity_metric,
+                ).flatten().item()
+            except (KeyError, ValueError, IndexError) as exc:
+                n_matched.loc[label1, label2] = 0
+                sim_matrix.loc[label1, label2] = np.nan
 
     return sim_matrix, n_matched
 
@@ -287,13 +296,27 @@ def analyze_subjects_parallel(
 ) -> list[dict]:
     subject_items = list(enumerate(datasets_by_subject.items()))
     if n_workers <= 1:
-        return [
-            analyze_subject(subj_i, subj_label, datasets_by_level)
-            for subj_i, (subj_label, datasets_by_level) in tqdm(
-                subject_items,
-                desc="Validation participants",
-            )
-        ]
+        results = []
+        for subj_i, (subj_label, datasets_by_level) in tqdm(
+            subject_items,
+            desc="Validation participants",
+        ):
+            try:
+                results.append(analyze_subject(subj_i, subj_label, datasets_by_level))
+            except Exception as exc:
+                results.append(
+                    {
+                        "subj_i": subj_i,
+                        "subj_label": subj_label,
+                        "rsa_results": {},
+                        "matched_counts": {},
+                        "messages": [
+                            f"[{subj_label}] Worker failed: {repr(exc)}",
+                            traceback.format_exc(),
+                        ],
+                    }
+                )
+        return results
 
     results = []
     with ProcessPoolExecutor(max_workers=n_workers) as executor:
@@ -303,7 +326,7 @@ def analyze_subjects_parallel(
                 subj_i,
                 subj_label,
                 datasets_by_level,
-            ): subj_label
+            ): (subj_i, subj_label)
             for subj_i, (subj_label, datasets_by_level) in subject_items
         }
         for future in tqdm(
@@ -311,7 +334,22 @@ def analyze_subjects_parallel(
             total=len(futures),
             desc="Validation participants",
         ):
-            results.append(future.result())
+            subj_i, subj_label = futures[future]
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                results.append(
+                    {
+                        "subj_i": subj_i,
+                        "subj_label": subj_label,
+                        "rsa_results": {},
+                        "matched_counts": {},
+                        "messages": [
+                            f"[{subj_label}] Worker failed: {repr(exc)}",
+                            traceback.format_exc(),
+                        ],
+                    }
+                )
 
     return sorted(results, key=lambda result: result["subj_i"])
 
