@@ -55,11 +55,76 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable progress bars.",
     )
+    parser.add_argument(
+        "--include-sourcedata",
+        action="store_true",
+        help=(
+            "Copy the original data directory into sourcedata/ after conversion. "
+            "The original directory is left untouched."
+        ),
+    )
+    parser.add_argument(
+        "--sourcedata-dir",
+        type=Path,
+        help=(
+            "Optional source directory to copy into sourcedata/. Defaults to data_dir "
+            "when --include-sourcedata is used."
+        ),
+    )
+    parser.add_argument(
+        "--sourcedata-name",
+        help="Destination folder name under sourcedata/. Defaults to source folder name.",
+    )
+    parser.add_argument(
+        "--derivatives-dir",
+        type=Path,
+        help="Optional preprocessed/derived data directory to copy into derivatives/.",
+    )
+    parser.add_argument(
+        "--pipeline-name",
+        default="preprocessed",
+        help="Destination folder name under derivatives/.",
+    )
+    parser.add_argument(
+        "--pipeline-version",
+        help="Optional derivative pipeline version.",
+    )
+    parser.add_argument(
+        "--pipeline-description",
+        help="Optional derivative pipeline description.",
+    )
+    parser.add_argument(
+        "--derivative-source-url",
+        default="../..",
+        help=(
+            "SourceDatasets URL for derivative metadata. Use 'none' to omit it. "
+            "Defaults to ../.., the containing raw BIDS dataset."
+        ),
+    )
+    parser.add_argument(
+        "--overwrite-extra-data",
+        action="store_true",
+        help=(
+            "Replace existing BIDS-side sourcedata/ or derivatives/ destination "
+            "folders. This never modifies the original source directories."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    include_sourcedata = args.include_sourcedata or args.sourcedata_dir is not None
+    if args.sourcedata_name is not None and not include_sourcedata:
+        raise ValueError(
+            "--sourcedata-name has no effect unless --include-sourcedata or "
+            "--sourcedata-dir is provided."
+        )
+    derivative_source_url = (
+        None
+        if args.derivative_source_url.lower() == "none"
+        else args.derivative_source_url
+    )
 
     errors = BIDSdata.convert_all_subj_data_to_bids(
         data_dir=args.data_dir,
@@ -70,6 +135,15 @@ def main() -> None:
         task_name=args.task_name,
         mne_verbose=args.mne_verbose,
         pbar=not args.no_progress,
+        include_sourcedata=include_sourcedata,
+        sourcedata_dir=args.sourcedata_dir,
+        sourcedata_name=args.sourcedata_name,
+        derivatives_dir=args.derivatives_dir,
+        pipeline_name=args.pipeline_name,
+        pipeline_version=args.pipeline_version,
+        pipeline_description=args.pipeline_description,
+        derivative_source_url=derivative_source_url,
+        overwrite_extra_data=args.overwrite_extra_data,
     )
     print(errors)
 

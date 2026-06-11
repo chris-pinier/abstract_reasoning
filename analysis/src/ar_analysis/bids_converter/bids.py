@@ -878,6 +878,165 @@ class BIDSdata:
         return BIDSdata.clean_macos_metadata_files(bids_root)
 
     @staticmethod
+    def _copy_extra_data_tree(
+        source_dir: Path,
+        destination_dir: Path,
+        overwrite: bool = False,
+    ) -> Path:
+        """Copy an extra-data directory into a BIDS-reserved destination."""
+        source_dir = Path(source_dir)
+        destination_dir = Path(destination_dir)
+
+        if not source_dir.exists():
+            raise FileNotFoundError(f"Source directory does not exist: {source_dir}")
+        if not source_dir.is_dir():
+            raise NotADirectoryError(f"Source path is not a directory: {source_dir}")
+
+        resolved_source = source_dir.resolve()
+        resolved_destination = destination_dir.resolve()
+        if resolved_destination.is_relative_to(resolved_source):
+            raise ValueError(
+                f"Refusing to copy {source_dir} into its own subtree: {destination_dir}"
+            )
+
+        if destination_dir.exists():
+            if not overwrite:
+                raise FileExistsError(
+                    f"Destination already exists: {destination_dir}. "
+                    "Pass overwrite=True to replace it."
+                )
+            shutil.rmtree(destination_dir)
+
+        destination_dir.parent.mkdir(exist_ok=True, parents=True)
+        shutil.copytree(source_dir, destination_dir)
+        BIDSdata.clean_macos_metadata_files(destination_dir)
+        return destination_dir
+
+    @staticmethod
+    def _validate_extra_data_destination_name(name: str, label: str) -> str:
+        """Validate a destination folder name under sourcedata/ or derivatives/."""
+        if not name:
+            raise ValueError(f"{label} destination name must not be empty.")
+
+        name_path = Path(name)
+        if name_path.is_absolute() or name_path.name != name or name in {".", ".."}:
+            raise ValueError(
+                f"{label} destination name must be a single folder name, got: {name}"
+            )
+
+        return name
+
+    @staticmethod
+    def include_sourcedata(
+        source_dir: Path,
+        bids_root: Path,
+        name: str | None = None,
+        overwrite: bool = False,
+    ) -> Path:
+        """Copy original non-BIDS source files into ``sourcedata/``.
+
+        BIDS reserves ``sourcedata/`` for files that predate BIDS conversion,
+        such as the original lab EEG, eye-tracking, behavioral, and session-info
+        files.
+        """
+        source_dir = Path(source_dir)
+        bids_root = Path(bids_root)
+        destination_name = BIDSdata._validate_extra_data_destination_name(
+            name or source_dir.name, "sourcedata"
+        )
+
+        return BIDSdata._copy_extra_data_tree(
+            source_dir=source_dir,
+            destination_dir=bids_root / "sourcedata" / destination_name,
+            overwrite=overwrite,
+        )
+
+    @staticmethod
+    def _write_derivative_dataset_description(
+        derivative_root: Path,
+        pipeline_name: str,
+        pipeline_version: str | None = None,
+        pipeline_description: str | None = None,
+        source_url: str | None = "../..",
+    ) -> None:
+        """Create or patch required BIDS derivative dataset metadata."""
+        description_path = derivative_root / "dataset_description.json"
+        if description_path.exists():
+            with open(description_path) as f:
+                description = json.load(f)
+        else:
+            description = {}
+
+        description.setdefault("Name", f"{pipeline_name} derivatives")
+        description["BIDSVersion"] = BIDSdata.BIDS_VERSION
+        description["DatasetType"] = "derivative"
+
+        generated_by = description.get("GeneratedBy")
+        if not isinstance(generated_by, list):
+            generated_by = []
+
+        if generated_by and isinstance(generated_by[0], dict):
+            generated_by[0].setdefault("Name", pipeline_name)
+            if pipeline_version is not None:
+                generated_by[0]["Version"] = pipeline_version
+            if pipeline_description is not None:
+                generated_by[0]["Description"] = pipeline_description
+        else:
+            entry = {"Name": pipeline_name}
+            if pipeline_version is not None:
+                entry["Version"] = pipeline_version
+            if pipeline_description is not None:
+                entry["Description"] = pipeline_description
+            generated_by.insert(0, entry)
+
+        description["GeneratedBy"] = generated_by
+        if source_url is not None:
+            source_datasets = description.get("SourceDatasets")
+            if not isinstance(source_datasets, list):
+                source_datasets = []
+            if not any(
+                isinstance(item, dict) and item.get("URL") == source_url
+                for item in source_datasets
+            ):
+                source_datasets.append({"URL": source_url})
+            description["SourceDatasets"] = source_datasets
+
+        BIDSdata._write_json(description_path, description)
+
+    @staticmethod
+    def include_derivatives(
+        derivatives_dir: Path,
+        bids_root: Path,
+        pipeline_name: str = "preprocessed",
+        overwrite: bool = False,
+        pipeline_version: str | None = None,
+        pipeline_description: str | None = None,
+        source_url: str | None = "../..",
+    ) -> Path:
+        """Copy preprocessed or otherwise derived files into ``derivatives/``.
+
+        The copied directory is treated as one derivative dataset and receives a
+        minimal ``dataset_description.json`` when one is missing.
+        """
+        pipeline_name = BIDSdata._validate_extra_data_destination_name(
+            pipeline_name, "derivatives"
+        )
+
+        destination = BIDSdata._copy_extra_data_tree(
+            source_dir=derivatives_dir,
+            destination_dir=Path(bids_root) / "derivatives" / pipeline_name,
+            overwrite=overwrite,
+        )
+        BIDSdata._write_derivative_dataset_description(
+            derivative_root=destination,
+            pipeline_name=pipeline_name,
+            pipeline_version=pipeline_version,
+            pipeline_description=pipeline_description,
+            source_url=source_url,
+        )
+        return destination
+
+    @staticmethod
     def _move_legacy_eye_tracking_outputs(
         bids_root: Path, task_name: str = "AbsPattComp"
     ) -> None:
@@ -1364,8 +1523,22 @@ class BIDSdata:
         task_name="AbsPattComp",
         mne_verbose: str = "WARNING",
         pbar: bool = True,
+        include_sourcedata: bool = False,
+        sourcedata_dir: Path | None = None,
+        sourcedata_name: str | None = None,
+        derivatives_dir: Path | None = None,
+        pipeline_name: str = "preprocessed",
+        pipeline_version: str | None = None,
+        pipeline_description: str | None = None,
+        derivative_source_url: str | None = "../..",
+        overwrite_extra_data: bool = False,
     ):
-        """Convert every subj_* directory in a raw lab data directory to BIDS."""
+        """Convert every subj_* directory and optionally attach extra BIDS data.
+
+        ``include_sourcedata`` copies the original source directory into
+        ``sourcedata/`` after conversion. ``derivatives_dir`` copies a
+        preprocessed output directory into ``derivatives/<pipeline_name>/``.
+        """
 
         subj_dirs = list_contents(data_dir, reg="subj.+", recurs=False)
         BIDSdata._prepare_bids_root(bids_root=bids_root, task_name=task_name)
@@ -1391,7 +1564,188 @@ class BIDSdata:
             behav_meta_path=behav_meta_path,
         )
 
+        if include_sourcedata:
+            BIDSdata.include_sourcedata(
+                source_dir=sourcedata_dir or data_dir,
+                bids_root=bids_root,
+                name=sourcedata_name,
+                overwrite=overwrite_extra_data,
+            )
+
+        if derivatives_dir is not None:
+            BIDSdata.include_derivatives(
+                derivatives_dir=derivatives_dir,
+                bids_root=bids_root,
+                pipeline_name=pipeline_name,
+                overwrite=overwrite_extra_data,
+                pipeline_version=pipeline_version,
+                pipeline_description=pipeline_description,
+                source_url=derivative_source_url,
+            )
+
         return errors
+
+    @staticmethod
+    def _format_validation_paths(paths: list[Path | str]) -> str:
+        """Format validation paths for a compact tabular report."""
+        return "; ".join(str(path) for path in paths)
+
+    @staticmethod
+    def _session_row_exists(sessions_tsv: Path, session_id: str) -> bool:
+        """Return whether a BIDS sessions.tsv contains the expected session row."""
+        if not sessions_tsv.exists():
+            return False
+        try:
+            sessions = pd.read_csv(sessions_tsv, sep="\t", dtype=str)
+        except Exception:
+            return False
+        if "session_id" not in sessions.columns:
+            return False
+        return session_id in set(sessions["session_id"].dropna())
+
+    @staticmethod
+    def validate_bids_conversion(
+        data_dir: Path,
+        bids_root: Path,
+        task_name: str = "AbsPattComp",
+    ) -> pd.DataFrame:
+        """Validate that each raw lab session has the expected converted BIDS files.
+
+        The validation is source-driven: every ``subj_* / sess_*`` directory in
+        ``data_dir`` is checked for source EEG, behavioral, eye-tracking, and
+        session-info files, then compared against the expected BIDS outputs.
+        """
+        rows = []
+        subj_dirs = sorted(
+            path
+            for path in Path(data_dir).glob("subj_*")
+            if path.is_dir() and re.fullmatch(r"subj_\d+", path.name)
+        )
+
+        for subj_dir in subj_dirs:
+            subj_id = f"{int(subj_dir.name.split('_')[1]):02}"
+            sess_dirs = sorted(
+                path
+                for path in subj_dir.glob("sess_*")
+                if path.is_dir() and re.fullmatch(r"sess_\d+", path.name)
+            )
+
+            for sess_dir in sess_dirs:
+                sess_id = f"{int(sess_dir.name.split('_')[1]):02}"
+                bids_subj_dir = Path(bids_root) / f"sub-{subj_id}"
+                bids_sess_dir = bids_subj_dir / f"ses-{sess_id}"
+                bids_base = f"sub-{subj_id}_ses-{sess_id}_task-{task_name}"
+
+                checks = {
+                    "behavior": {
+                        "source": sorted(sess_dir.glob("*-behav.csv")),
+                        "required": [
+                            bids_sess_dir / "beh" / f"{bids_base}_beh.tsv",
+                            bids_sess_dir / "beh" / f"{bids_base}_beh.json",
+                        ],
+                        "patterns": [],
+                    },
+                    "eeg": {
+                        "source": sorted(sess_dir.glob("*.bdf"))
+                        + sorted(sess_dir.glob("*.BDF")),
+                        "required": [
+                            bids_sess_dir / "eeg" / f"{bids_base}_eeg.bdf",
+                            bids_sess_dir / "eeg" / f"{bids_base}_eeg.json",
+                            bids_sess_dir / "eeg" / f"{bids_base}_channels.tsv",
+                            bids_sess_dir / f"sub-{subj_id}_ses-{sess_id}_scans.tsv",
+                        ],
+                        "patterns": [],
+                    },
+                    "eyetracking": {
+                        "source": sorted(sess_dir.glob("*.edf"))
+                        + sorted(sess_dir.glob("*.EDF")),
+                        "required": [],
+                        "patterns": [
+                            bids_sess_dir
+                            / "eeg"
+                            / f"{bids_base}_recording-eye*_physio.tsv.gz",
+                            bids_sess_dir
+                            / "eeg"
+                            / f"{bids_base}_recording-eye*_physio.json",
+                            bids_sess_dir
+                            / "eeg"
+                            / f"{bids_base}_recording-eye*_physioevents.tsv.gz",
+                            bids_sess_dir
+                            / "eeg"
+                            / f"{bids_base}_recording-eye*_physioevents.json",
+                        ],
+                    },
+                    "session_info": {
+                        "source": sorted(sess_dir.glob("*sess_info.json")),
+                        "required": [
+                            bids_subj_dir / f"sub-{subj_id}_sessions.tsv",
+                            bids_subj_dir / f"sub-{subj_id}_sessions.json",
+                        ],
+                        "patterns": [],
+                    },
+                }
+
+                for datatype, check in checks.items():
+                    source_files = check["source"]
+                    present_bids_files = [
+                        path for path in check["required"] if path.exists()
+                    ]
+                    missing_bids = [
+                        path for path in check["required"] if not path.exists()
+                    ]
+
+                    for pattern in check["patterns"]:
+                        matches = sorted(pattern.parent.glob(pattern.name))
+                        present_bids_files.extend(matches)
+                        if not matches:
+                            missing_bids.append(str(pattern))
+
+                    if datatype == "session_info":
+                        sessions_tsv = bids_subj_dir / f"sub-{subj_id}_sessions.tsv"
+                        if not BIDSdata._session_row_exists(
+                            sessions_tsv, f"ses-{sess_id}"
+                        ):
+                            missing_bids.append(f"{sessions_tsv}: row ses-{sess_id}")
+
+                    if not source_files:
+                        status = "source_missing"
+                    elif missing_bids:
+                        status = "missing_bids"
+                    else:
+                        status = "ok"
+
+                    rows.append(
+                        {
+                            "subject": f"sub-{subj_id}",
+                            "session": f"ses-{sess_id}",
+                            "datatype": datatype,
+                            "status": status,
+                            "source_count": len(source_files),
+                            "bids_count": len(present_bids_files),
+                            "source_files": BIDSdata._format_validation_paths(
+                                source_files
+                            ),
+                            "bids_files": BIDSdata._format_validation_paths(
+                                present_bids_files
+                            ),
+                            "missing_bids": BIDSdata._format_validation_paths(
+                                missing_bids
+                            ),
+                        }
+                    )
+
+        columns = [
+            "subject",
+            "session",
+            "datatype",
+            "status",
+            "source_count",
+            "bids_count",
+            "source_files",
+            "bids_files",
+            "missing_bids",
+        ]
+        return pd.DataFrame(rows, columns=columns)
 
     @staticmethod
     def read_bids():

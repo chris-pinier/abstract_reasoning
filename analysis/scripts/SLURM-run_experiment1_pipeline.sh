@@ -55,7 +55,7 @@ FRP_CONTROL_METHOD="${FRP_CONTROL_METHOD:-circular_shift}"
 RANDOM_CONTROL_START_EVENT="${RANDOM_CONTROL_START_EVENT:-stim-all_stim}"
 RANDOM_CONTROL_END_EVENT="${RANDOM_CONTROL_END_EVENT:-trial_end}"
 RANDOM_CONTROL_MIN_ONSET_DIFF_S="${RANDOM_CONTROL_MIN_ONSET_DIFF_S:-0.300}"
-HEATMAP_BIN_SIZE="${HEATMAP_BIN_SIZE:-50}"
+SEQUENCE_HEATMAP_METRIC="${SEQUENCE_HEATMAP_METRIC:-count}"
 
 mkdir -p slurm_output
 mkdir -p "$OUTPUT_BASE_DIR"
@@ -73,6 +73,7 @@ echo "FRP_BASELINE:     $FRP_BASELINE"
 echo "RESPONSE_BASELINE:$RESPONSE_BASELINE"
 echo "REST_BASELINE:    $REST_BASELINE"
 echo "FRP_CONTROL:      $FRP_CONTROL_METHOD"
+echo "HEATMAP_METRIC:   $SEQUENCE_HEATMAP_METRIC"
 echo "SLURM_ARRAY_TASK_ID: ${SLURM_ARRAY_TASK_ID:-none}"
 echo "--------------------------------------"
 
@@ -119,7 +120,7 @@ srun python scripts/experiment1_pipeline.py \
     --random-control-start-event "$RANDOM_CONTROL_START_EVENT" \
     --random-control-end-event "$RANDOM_CONTROL_END_EVENT" \
     --random-control-min-onset-diff-s "$RANDOM_CONTROL_MIN_ONSET_DIFF_S" \
-    --heatmap-bin-size "$HEATMAP_BIN_SIZE"
+    --sequence-heatmap-metric "$SEQUENCE_HEATMAP_METRIC"
 
 end_time=$(date +%s)
 runtime=$((end_time - start_time))

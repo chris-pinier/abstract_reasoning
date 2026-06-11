@@ -7,6 +7,9 @@ import json
 import os
 import sys
 import pickle
+import subprocess
+import platform
+import contextlib
 
 
 def find_repo_root(start: Path | None = None) -> Path:
@@ -41,7 +44,6 @@ from rsatoolbox.data import Dataset
 from rsatoolbox.rdm import calc_rdm, RDMs
 
 from ar_analysis.analysis_config import Config as c
-from ar_analysis.analysis_plotting import get_gaze_heatmap
 from ar_analysis.data_loader.human import HumanSubjData, HumanSessData
 from ar_analysis.utils.analysis_utils import get_trial_info, save_pickle
 
@@ -86,12 +88,13 @@ RANDOM_CONTROL_START_EVENT = "stim-all_stim"
 RANDOM_CONTROL_END_EVENT = "trial_end"
 RANDOM_CONTROL_MIN_ONSET_DIFF_S = 0.200
 SHIFT_CONTROL_MAX_ATTEMPTS = 1_000
-HEATMAP_BIN_SIZE = 50
+SEQUENCE_HEATMAP_METRIC = "count"
 
 # Dataset/RDM export settings.
 DISSIMILARITY_METRIC = "correlation"
 DATASET_LEVELS = ["trial_lvl", "pattern_lvl"]
 EXPORT_EVOKED_OBJECTS = False
+REDIRECT_SUBJECT_OUTPUT = True
 
 
 def resolve_channel_group(channel_group: str) -> list[str] | str:
@@ -182,7 +185,7 @@ def apply_runtime_config(config: dict) -> None:
     global RANDOM_CONTROL_END_EVENT, RANDOM_CONTROL_MIN_ONSET_DIFF_S
     global EXPORT_EVOKED_OBJECTS, DATASET_LEVELS, CHANNEL_GROUP, SELECTED_CHANS
     global FRP_BASELINE, RESPONSE_BASELINE, REST_BASELINE, FRP_CONTROL_METHOD
-    global HEATMAP_BIN_SIZE
+    global SEQUENCE_HEATMAP_METRIC, REDIRECT_SUBJECT_OUTPUT
 
     DATA_ROOT = Path(config["data_root"])
     HUMAN_DATA_DIR = Path(config["human_data_dir"])
@@ -195,6 +198,7 @@ def apply_runtime_config(config: dict) -> None:
     RANDOM_CONTROL_END_EVENT = config["random_control_end_event"]
     RANDOM_CONTROL_MIN_ONSET_DIFF_S = float(config["random_control_min_onset_diff_s"])
     EXPORT_EVOKED_OBJECTS = bool(config["export_evoked_objects"])
+    REDIRECT_SUBJECT_OUTPUT = bool(config["redirect_subject_output"])
     DATASET_LEVELS = list(config["dataset_levels"])
     CHANNEL_GROUP = config["channel_group"]
     SELECTED_CHANS = resolve_channel_group(CHANNEL_GROUP)
@@ -210,7 +214,7 @@ def apply_runtime_config(config: dict) -> None:
         tuple(config["rest_baseline"]) if config["rest_baseline"] is not None else None
     )
     FRP_CONTROL_METHOD = config["frp_control_method"]
-    HEATMAP_BIN_SIZE = int(config["heatmap_bin_size"])
+    SEQUENCE_HEATMAP_METRIC = config["sequence_heatmap_metric"]
 
 
 def build_config(run_dirs: dict[str, Path]) -> dict:
@@ -236,10 +240,11 @@ def build_config(run_dirs: dict[str, Path]) -> dict:
         "random_control_start_event": RANDOM_CONTROL_START_EVENT,
         "random_control_end_event": RANDOM_CONTROL_END_EVENT,
         "random_control_min_onset_diff_s": RANDOM_CONTROL_MIN_ONSET_DIFF_S,
-        "heatmap_bin_size": HEATMAP_BIN_SIZE,
+        "sequence_heatmap_metric": SEQUENCE_HEATMAP_METRIC,
         "dissimilarity_metric": DISSIMILARITY_METRIC,
         "dataset_levels": DATASET_LEVELS,
         "export_evoked_objects": EXPORT_EVOKED_OBJECTS,
+        "redirect_subject_output": REDIRECT_SUBJECT_OUTPUT,
     }
 
 
@@ -437,21 +442,26 @@ def extract_random_control_frp(
     return evoked, starts.tolist()
 
 
-def valid_sequence_fixation_onsets_and_gaze(
+def valid_fixation_metadata(
     sess: HumanSessData,
     eeg_trial: mne.io.Raw,
     et_trial: mne.io.Raw,
     behav: pd.DataFrame,
     trial_N: int,
-) -> tuple[list[int], list[np.ndarray]]:
-    """Return valid sequence-fixation EEG onset samples and gaze traces."""
-    cropped_et_trial, et_annotations, time_bounds = sess.crop_et_trial(et_trial)
+) -> tuple[list[int], pd.DataFrame]:
+    """Return valid sequence-fixation EEG onset samples and a stim summary table."""
+    try:
+        cropped_et_trial, et_annotations, time_bounds = sess.crop_et_trial(et_trial)
+    except (IndexError, KeyError, ValueError):
+        return [], sess._empty_stim_fixation_summary()
     (
         stimulus_positions,
         _,
         sequence_items,
         choice_items,
-        *_,
+        _,
+        solution,
+        _,
     ) = get_trial_info(
         trial_N,
         behav,
@@ -464,6 +474,21 @@ def valid_sequence_fixation_onsets_and_gaze(
     selected_stim_inds = set(
         sess._stim_inds_for_scope(FRP_STIM_SCOPE, sequence_items, choice_items)
     )
+    stim_labels = sequence_items.copy()
+    stim_labels.update({k + len(sequence_items): v for k, v in choice_items.items()})
+    solution_stim_ind = {v: k for k, v in choice_items.items()}.get(solution)
+    if solution_stim_ind is None:
+        stimulus_types = {
+            stim_ind: ("sequence" if stim_ind < 7 else "question_mark")
+            for stim_ind in stim_labels
+        }
+    else:
+        solution_stim_ind += len(sequence_items)
+        stimulus_types = sess._stimulus_type_map(
+            stim_labels,
+            sequence_items,
+            solution_stim_ind,
+        )
 
     et_data = cropped_et_trial.get_data()
     et_times = cropped_et_trial.times
@@ -471,7 +496,7 @@ def valid_sequence_fixation_onsets_and_gaze(
     n_epoch_samples = n_samples_for_window(eeg_trial, FRP_TMIN, FRP_TMAX)
     window_offset_samples = int(np.round(FRP_TMIN * sfreq))
     onsets = []
-    gaze_traces = []
+    fixation_rows = []
 
     for fixation_ind in et_annotations.query("description == 'fixation'").index:
         fixation = et_annotations.loc[fixation_ind]
@@ -501,9 +526,32 @@ def valid_sequence_fixation_onsets_and_gaze(
             continue
 
         onsets.append(onset_sample)
-        gaze_traces.append(np.stack([gaze_x, gaze_y], axis=0))
+        if et_data.shape[0] > 2:
+            pupil_diam = et_data[2, et_start_sample:et_stop_sample]
+        else:
+            pupil_diam = np.full(et_stop_sample - et_start_sample, np.nan)
+        fixation_rows.append(
+            [
+                stim_ind,
+                fixation_onset,
+                fixation_duration,
+                np.nanmean(pupil_diam),
+            ]
+        )
 
-    return onsets, gaze_traces
+    fixation_events = sess._fixation_events_table(
+        fixation_rows,
+        trial_N,
+        stim_labels,
+        stimulus_types,
+    )
+    fixation_summary = sess._stim_fixation_summary(
+        fixation_events,
+        trial_N,
+        stim_labels,
+        stimulus_types,
+    )
+    return onsets, fixation_summary
 
 
 def circular_shift_onsets(
@@ -583,35 +631,30 @@ def extract_shifted_control_frp(
 
 
 def extract_sequence_heatmap(
-    sess: HumanSessData,
-    eeg_trial: mne.io.Raw,
-    et_trial: mne.io.Raw,
-    behav: pd.DataFrame,
-    trial_N: int,
+    fixation_summary: pd.DataFrame,
+    metric: str = SEQUENCE_HEATMAP_METRIC,
 ) -> np.ndarray | None:
-    """Create one flattened gaze heatmap from valid sequence-icon fixations."""
-    _, gaze_traces = valid_sequence_fixation_onsets_and_gaze(
-        sess,
-        eeg_trial,
-        et_trial,
-        behav,
-        trial_N,
-    )
-    if not gaze_traces:
+    """Create one sequence-position vector from per-stim fixation summary values."""
+    sequence_icon_inds = list(range(8))
+    if metric not in {"count", "total_duration", "mean_duration", "first_fix_order"}:
+        raise ValueError(
+            "sequence heatmap metric must be one of: "
+            "count, total_duration, mean_duration, first_fix_order"
+        )
+    if fixation_summary.empty:
         return None
 
-    gaze = np.concatenate(gaze_traces, axis=1)
-    heatmap, _, _ = get_gaze_heatmap(
-        gaze[0],
-        gaze[1],
-        screen_res=c.SCREEN_RESOLUTION,
-        bin_size=HEATMAP_BIN_SIZE,
-        show=False,
-        normalize=True,
-    )
-    if not np.isfinite(heatmap).all():
+    fill_value = 0.0 if metric in {"count", "total_duration"} else np.nan
+    values = np.full(len(sequence_icon_inds), fill_value, dtype=float)
+    sequence_rows = fixation_summary.query("stim_ind in @sequence_icon_inds")
+    if sequence_rows.empty:
         return None
-    return heatmap.reshape(-1)
+
+    for _, row in sequence_rows.iterrows():
+        stim_ind = int(row["stim_ind"])
+        values[stim_ind] = float(row[metric])
+
+    return values
 
 
 def extract_true_frp(
@@ -622,18 +665,21 @@ def extract_true_frp(
     trial_N: int,
 ) -> tuple[mne.Evoked | None, int]:
     """Extract the true sequence-FRP and return the number of valid fixation epochs."""
-    frp, fixation_epochs = sess.get_trial_frp(
-        eeg_trial=eeg_trial,
-        et_trial=et_trial,
-        raw_behav=behav,
-        trial_N=trial_N,
-        stim_scope=FRP_STIM_SCOPE,
-        tmin=FRP_TMIN,
-        tmax=FRP_TMAX,
-        baseline=FRP_BASELINE,
-        selected_chans=SELECTED_CHANS,
-        return_epochs=True,
-    )
+    try:
+        frp, fixation_epochs = sess.get_trial_frp(
+            eeg_trial=eeg_trial,
+            et_trial=et_trial,
+            raw_behav=behav,
+            trial_N=trial_N,
+            stim_scope=FRP_STIM_SCOPE,
+            tmin=FRP_TMIN,
+            tmax=FRP_TMAX,
+            baseline=FRP_BASELINE,
+            selected_chans=SELECTED_CHANS,
+            return_epochs=True,
+        )
+    except (IndexError, KeyError, ValueError):
+        return None, 0
     n_fixations = 0 if fixation_epochs is None else len(fixation_epochs)
     return frp, n_fixations
 
@@ -699,7 +745,7 @@ def process_subject_trials(
             }
             trial_records[uid] = record
 
-            true_onset_samples, _ = valid_sequence_fixation_onsets_and_gaze(
+            true_onset_samples, fixation_summary = valid_fixation_metadata(
                 sess,
                 eeg_trial,
                 et_trial,
@@ -758,9 +804,7 @@ def process_subject_trials(
             if rest is not None:
                 condition_data["rest"][uid] = rest
 
-            heatmap = extract_sequence_heatmap(
-                sess, eeg_trial, et_trial, behav, trial_N
-            )
+            heatmap = extract_sequence_heatmap(fixation_summary)
             if heatmap is not None:
                 condition_data["sequence_heatmap"][uid] = heatmap
 
@@ -811,8 +855,7 @@ def infer_feature_shape(
 
 
 def heatmap_feature_shape() -> tuple[int, ...]:
-    screen_width, screen_height = c.SCREEN_RESOLUTION
-    return ((screen_width // HEATMAP_BIN_SIZE) * (screen_height // HEATMAP_BIN_SIZE),)
+    return (8,)
 
 
 def infer_eeg_feature_shape(
@@ -1177,11 +1220,36 @@ def run_subject_experiment(subj_N: int, run_dir: str | Path, config: dict) -> di
     return status_row
 
 
+@contextlib.contextmanager
+def redirected_subject_output(
+    subj_N: int,
+    run_dir: str | Path,
+    config: dict,
+):
+    """Redirect noisy subject-level stdout/stderr to a per-subject log file."""
+    if not config.get("redirect_subject_output", True):
+        yield
+        return
+
+    log_dir = dirs_from_run_dir(Path(run_dir))["logs"]
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"subj_{int(subj_N):02}_stdout_stderr.log"
+    with open(log_path, "a") as f:
+        f.write(f"\n--- subject {int(subj_N):02} started {datetime.now().isoformat(timespec='seconds')} ---\n")
+        f.flush()
+        try:
+            with contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
+                yield
+        finally:
+            f.write(f"\n--- subject {int(subj_N):02} finished {datetime.now().isoformat(timespec='seconds')} ---\n")
+
+
 def run_subject_safe(
     subj_N: int, run_dir: str | Path, config: dict
 ) -> tuple[dict, dict | None]:
     try:
-        return run_subject_experiment(subj_N, run_dir, config), None
+        with redirected_subject_output(subj_N, run_dir, config):
+            return run_subject_experiment(subj_N, run_dir, config), None
     except Exception as exc:
         error = {
             "subj_N": int(subj_N),
@@ -1217,6 +1285,59 @@ def write_run_outputs(
     with open(run_dirs["metadata"] / "config.json", "w") as f:
         json.dump(config, f, indent=2)
     return summary_df
+
+
+def safe_command_output(cmd: list[str]) -> str | None:
+    try:
+        return subprocess.check_output(
+            cmd,
+            cwd=ROOT,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return None
+
+
+def package_version(module_name: str) -> str | None:
+    try:
+        module = __import__(module_name)
+        return getattr(module, "__version__", None)
+    except Exception:
+        return None
+
+
+def write_parameters_sidecar(
+    run_dirs: dict[str, Path],
+    config: dict,
+    argv: list[str] | None,
+) -> None:
+    """Write a reproducibility sidecar with run parameters and environment info."""
+    sidecar = {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "script": str(Path(__file__).resolve()),
+        "repo_root": str(ROOT),
+        "argv": sys.argv if argv is None else [str(Path(__file__).resolve()), *argv],
+        "config": config,
+        "python": {
+            "executable": sys.executable,
+            "version": sys.version,
+            "platform": platform.platform(),
+        },
+        "packages": {
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+            "mne": mne.__version__,
+            "rsatoolbox": package_version("rsatoolbox"),
+        },
+        "git": {
+            "commit": safe_command_output(["git", "rev-parse", "HEAD"]),
+            "branch": safe_command_output(["git", "branch", "--show-current"]),
+            "status_short": safe_command_output(["git", "status", "--short"]),
+        },
+    }
+    with open(run_dirs["metadata"] / "parameters_sidecar.json", "w") as f:
+        json.dump(sidecar, f, indent=2)
 
 
 def run_experiment(
@@ -1314,8 +1435,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=RANDOM_CONTROL_MIN_ONSET_DIFF_S,
     )
-    parser.add_argument("--heatmap-bin-size", type=int, default=HEATMAP_BIN_SIZE)
+    parser.add_argument(
+        "--sequence-heatmap-metric",
+        type=str,
+        default=SEQUENCE_HEATMAP_METRIC,
+        choices=["count", "total_duration", "mean_duration", "first_fix_order"],
+        help="Per-sequence-item fixation summary value exported as sequence_heatmap.",
+    )
     parser.add_argument("--export-evoked-objects", action="store_true")
+    parser.add_argument(
+        "--no-redirect-subject-output",
+        action="store_false",
+        dest="redirect_subject_output",
+        help="Keep subject-level stdout/stderr in the terminal instead of per-subject log files.",
+    )
+    parser.set_defaults(redirect_subject_output=REDIRECT_SUBJECT_OUTPUT)
     return parser
 
 
@@ -1329,7 +1463,8 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
         RANDOM_CONTROL_MIN_ONSET_DIFF_S, \
         EXPORT_EVOKED_OBJECTS
     global CHANNEL_GROUP, SELECTED_CHANS, FRP_BASELINE, RESPONSE_BASELINE, REST_BASELINE
-    global FRP_CONTROL_METHOD, HEATMAP_BIN_SIZE
+    global FRP_CONTROL_METHOD, SEQUENCE_HEATMAP_METRIC
+    global REDIRECT_SUBJECT_OUTPUT
     global RUN_DIRS
 
     DATA_ROOT = Path(args.data_root)
@@ -1356,8 +1491,9 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
     RANDOM_CONTROL_START_EVENT = args.random_control_start_event
     RANDOM_CONTROL_END_EVENT = args.random_control_end_event
     RANDOM_CONTROL_MIN_ONSET_DIFF_S = args.random_control_min_onset_diff_s
-    HEATMAP_BIN_SIZE = args.heatmap_bin_size
+    SEQUENCE_HEATMAP_METRIC = args.sequence_heatmap_metric
     EXPORT_EVOKED_OBJECTS = bool(args.export_evoked_objects)
+    REDIRECT_SUBJECT_OUTPUT = bool(args.redirect_subject_output)
 
     subj_ns = (
         SUBJ_NS
@@ -1369,6 +1505,7 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
         f"experiment1_{channel_tag()}_{baseline_tag(FRP_BASELINE)}",
     )
     config = build_config(RUN_DIRS)
+    write_parameters_sidecar(RUN_DIRS, config, argv)
 
     print(f"Run dir:          {RUN_DIRS['run']}")
     print(f"HUMAN_DATA_DIR:   {HUMAN_DATA_DIR} exists={HUMAN_DATA_DIR.exists()}")
@@ -1379,6 +1516,8 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
         f"Channel group:    {CHANNEL_GROUP} ({len(SELECTED_CHANS) if isinstance(SELECTED_CHANS, list) else SELECTED_CHANS})"
     )
     print(f"FRP control:      {FRP_CONTROL_METHOD}")
+    print(f"Heatmap metric:   {SEQUENCE_HEATMAP_METRIC}")
+    print(f"Subject logs:     {RUN_DIRS['logs']} (redirect={REDIRECT_SUBJECT_OUTPUT})")
     print(
         f"Baselines:        frp={FRP_BASELINE}, response={RESPONSE_BASELINE}, rest={REST_BASELINE}"
     )
