@@ -8,6 +8,19 @@ from ar_analysis.bids_converter.bids import BIDSdata
 from ar_analysis.paths import ANALYSIS_DIR, PACKAGE_DIR
 
 
+def _write_validation_report(report, output: Path) -> None:
+    output.parent.mkdir(exist_ok=True, parents=True)
+    suffix = output.suffix.lower()
+    if suffix == ".tsv":
+        report.to_csv(output, sep="\t", index=False)
+    elif suffix == ".csv":
+        report.to_csv(output, index=False)
+    elif suffix == ".json":
+        report.to_json(output, orient="records", indent=2)
+    else:
+        raise ValueError("Validation report output must end with .tsv, .csv, or .json")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Convert the full lab dataset to BIDS."
@@ -54,6 +67,15 @@ def parse_args() -> argparse.Namespace:
         "--no-progress",
         action="store_true",
         help="Disable progress bars.",
+    )
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=1,
+        help=(
+            "Number of subject conversions to run in parallel. Defaults to 1. "
+            "Use a small value on external drives to avoid I/O contention."
+        ),
     )
     parser.add_argument(
         "--include-sourcedata",
@@ -109,6 +131,24 @@ def parse_args() -> argparse.Namespace:
             "folders. This never modifies the original source directories."
         ),
     )
+    parser.add_argument(
+        "--validate-conversion",
+        action="store_true",
+        help=(
+            "After conversion, validate that source behavior, EEG, eye-tracking, "
+            "and session-info files have corresponding BIDS outputs."
+        ),
+    )
+    parser.add_argument(
+        "--validation-output",
+        type=Path,
+        help="Optional validation report path. Supports .tsv, .csv, and .json.",
+    )
+    parser.add_argument(
+        "--fail-on-validation-errors",
+        action="store_true",
+        help="Exit with code 1 when --validate-conversion finds non-ok rows.",
+    )
     return parser.parse_args()
 
 
@@ -144,8 +184,36 @@ def main() -> None:
         pipeline_description=args.pipeline_description,
         derivative_source_url=derivative_source_url,
         overwrite_extra_data=args.overwrite_extra_data,
+        n_jobs=args.n_jobs,
     )
     print(errors)
+
+    if args.validate_conversion or args.validation_output is not None:
+        report = BIDSdata.validate_bids_conversion(
+            data_dir=args.data_dir,
+            bids_root=args.bids_root,
+            task_name=args.task_name,
+        )
+        problem_rows = report.query("status != 'ok'")
+        outcome = "PASSED" if problem_rows.empty else "FAILED"
+        summary = (
+            report.groupby(["datatype", "status"], dropna=False)
+            .size()
+            .rename("n")
+            .reset_index()
+        )
+        print(
+            f"Data type mapping validation {outcome}: "
+            f"{len(report)} rows checked, {len(problem_rows)} non-ok row(s)."
+        )
+        print(summary.to_string(index=False))
+
+        if args.validation_output is not None:
+            _write_validation_report(report, args.validation_output)
+            print(f"Wrote validation report to {args.validation_output}")
+
+        if args.fail_on_validation_errors and not problem_rows.empty:
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

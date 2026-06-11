@@ -13,6 +13,7 @@ import io
 import pickle
 import tomllib
 import re
+import yaml
 from rsatoolbox.data import Dataset, TemporalDataset
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -841,15 +842,16 @@ def set_eeg_montage(
 
 
 def read_file(
-    file_path: Path | str, *, hdf5_key: str | None = None, verbose: bool = True
+    file_path: Path | str, *, hdf5_key: str | None = None, verbose: bool = False
 ):
     """
-    Reads a file based on its extension. Supports JSON, TOML, pickle, CSV, NPY, HDF5.
+    Reads a file based on its extension. Supports JSON, YAML, TOML, pickle, CSV, NPY, HDF5.
     Uses context managers for file handling.
 
     Args:
         file_path: A pathlib.Path object representing the file to read.
         hdf5_key: Optional HDF5 key/path (e.g., "group/dataset" or pandas table key).
+        verbose: If True, print the opened extension and loaded data type.
 
     Returns:
         The loaded data.
@@ -946,6 +948,8 @@ def read_file(
 
     file_readers = {
         ".json": lambda f: json.load(f),
+        ".yaml": lambda f: yaml.safe_load(f),
+        ".yml": lambda f: yaml.safe_load(f),
         ".toml": lambda f: tomllib.load(f),
         ".pickle": lambda f: pickle.load(f),
         ".pkl": lambda f: pickle.load(f),
@@ -966,7 +970,7 @@ def read_file(
     print(f"Opening {ext} file...") if verbose else None
     binary_exts = [".toml", ".pickle", ".pkl"]
     try:
-        if ext in (".toml", ".json", ".pickle", ".pkl"):
+        if ext in (".toml", ".json", ".yaml", ".yml", ".pickle", ".pkl"):
             with open(file_path, "rb" if ext in binary_exts else "r") as file:
                 data = reader_func(file)
         elif ext in (".csv", ".npy", ".h5", ".hdf5"):
@@ -977,7 +981,12 @@ def read_file(
         print(f"data type = {dtype}") if verbose else None
 
         return data
-    except (json.JSONDecodeError, pickle.UnpicklingError, pd.errors.ParserError) as e:
+    except (
+        json.JSONDecodeError,
+        yaml.YAMLError,
+        pickle.UnpicklingError,
+        pd.errors.ParserError,
+    ) as e:
         raise Exception(f"Error reading file '{file_path}': {e}") from e
     except FileNotFoundError:
         raise

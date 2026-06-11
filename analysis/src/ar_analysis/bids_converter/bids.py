@@ -14,6 +14,10 @@ import subprocess
 import re
 import yaml
 import shutil
+import contextlib
+import io
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Manager
 
 # from mne.preprocessing.eyetracking import read_eyelink_calibration
 # from icecream import ic
@@ -305,6 +309,18 @@ class BIDSdata:
         with open(path, "w") as f:
             json.dump(content, f, indent=4, allow_nan=False)
             f.write("\n")
+
+    @staticmethod
+    def _call_with_lock(lock: Any | None, func, *args, **kwargs):
+        """Run a function while holding an optional multiprocessing-compatible lock."""
+        if lock is None:
+            return func(*args, **kwargs)
+
+        lock.acquire()
+        try:
+            return func(*args, **kwargs)
+        finally:
+            lock.release()
 
     @staticmethod
     def _write_dataset_description(
@@ -1267,6 +1283,8 @@ class BIDSdata:
         bids_root: Path,
         task_name="AbsPattComp",
         mne_verbose: str = "WARNING",
+        pbar: bool = True,
+        bids_write_lock: Any | None = None,
     ):
         """Convert all available sessions for one raw lab subject directory.
 
@@ -1292,14 +1310,21 @@ class BIDSdata:
         eye_metadata = read_file(et_meta_path)
         behav_metadata = read_file(behav_meta_path)
 
-        BIDSdata._prepare_bids_root(bids_root=bids_root, task_name=task_name)
+        BIDSdata._call_with_lock(
+            bids_write_lock,
+            BIDSdata._prepare_bids_root,
+            bids_root=bids_root,
+            task_name=task_name,
+        )
 
         errors = []
         session_rows = []
 
         # TODO: add logger and hide outputs of eye2bids from the console
         # * Added tqdm back to the loop so tqdm.write formats nicely
-        for sess_dir in tqdm(sess_dirs, desc=f"Converting Subj {subj_id}"):
+        for sess_dir in tqdm(
+            sess_dirs, desc=f"Converting Subj {subj_id}", disable=not pbar
+        ):
             sess_N = int(sess_dir.name.split("_")[1])
             sess_id = f"{sess_N:02}"
 
@@ -1370,13 +1395,15 @@ class BIDSdata:
                     suffix="eeg",
                 )
 
-                write_raw_bids(
+                BIDSdata._call_with_lock(
+                    bids_write_lock,
+                    write_raw_bids,
                     raw_eeg,
                     eeg_bids_path,
                     event_id=event_id,
                     overwrite=True,
-                    # raw_eeg, eeg_bids_path, event_id=c.VALID_EVENTS, overwrite=True
                 )
+                # raw_eeg, eeg_bids_path, event_id=c.VALID_EVENTS, overwrite=True
                 # TODO: consider filling the following missing fields in .+_eeg.json
                 # "PowerLineFrequency": "n/a",
                 # "SoftwareFilters": "n/a",
@@ -1474,7 +1501,10 @@ class BIDSdata:
                     # If the command failed, log it and manually trigger the except block
                     raise RuntimeError(f"eye2bids failed: {result.stderr}")
 
-                tqdm.write(f"Successfully converted ET data for {et_file.name}")
+                tqdm.write(
+                    f"Successfully converted ET data for subj_{subj_id} "
+                    f"sess_{sess_id}: {et_file.name}"
+                )
 
                 # Clean up intermediate .asc files ONLY if successful
                 intermediate_files = list_contents(
@@ -1514,6 +1544,42 @@ class BIDSdata:
         return errors
 
     @staticmethod
+    def _convert_subj_data_to_bids_captured(
+        subj_dir: Path,
+        eye2bids_exe: Path,
+        et_meta_path: Path,
+        behav_meta_path: Path,
+        bids_root: Path,
+        task_name: str,
+        mne_verbose: str,
+        bids_write_lock: Any,
+    ) -> tuple[list, str, str]:
+        """Convert one subject while capturing noisy child-process console output."""
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            errors = BIDSdata.convert_subj_data_to_bids(
+                subj_dir,
+                eye2bids_exe=eye2bids_exe,
+                et_meta_path=et_meta_path,
+                behav_meta_path=behav_meta_path,
+                bids_root=bids_root,
+                task_name=task_name,
+                mne_verbose=mne_verbose,
+                pbar=False,
+                bids_write_lock=bids_write_lock,
+            )
+
+        return errors, stdout.getvalue(), stderr.getvalue()
+
+    @staticmethod
+    def _write_worker_output(subj_name: str, stdout: str, stderr: str) -> None:
+        """Print captured worker output as one grouped block."""
+        output = "\n".join(part.rstrip() for part in (stdout, stderr) if part.strip())
+        if output:
+            tqdm.write(f"--- Captured output for {subj_name} ---\n{output}")
+
+    @staticmethod
     def convert_all_subj_data_to_bids(
         data_dir: Path,
         eye2bids_exe: Path,
@@ -1532,30 +1598,78 @@ class BIDSdata:
         pipeline_description: str | None = None,
         derivative_source_url: str | None = "../..",
         overwrite_extra_data: bool = False,
+        n_jobs: int = 1,
     ):
         """Convert every subj_* directory and optionally attach extra BIDS data.
 
         ``include_sourcedata`` copies the original source directory into
         ``sourcedata/`` after conversion. ``derivatives_dir`` copies a
         preprocessed output directory into ``derivatives/<pipeline_name>/``.
+        ``n_jobs`` controls subject-level multiprocessing; shared BIDS writes
+        are locked when ``n_jobs`` is greater than one.
         """
+        if n_jobs < 1:
+            raise ValueError("n_jobs must be >= 1.")
 
         subj_dirs = list_contents(data_dir, reg="subj.+", recurs=False)
         BIDSdata._prepare_bids_root(bids_root=bids_root, task_name=task_name)
 
         errors = {}
+        if not subj_dirs:
+            logger.warning(f"No subject directories found in {data_dir}")
 
-        for subj_dir in tqdm(subj_dirs, disable=not pbar):
-            subj_errors = BIDSdata.convert_subj_data_to_bids(
-                subj_dir,
-                eye2bids_exe=eye2bids_exe,
-                et_meta_path=et_meta_path,
-                behav_meta_path=behav_meta_path,
-                bids_root=bids_root,
-                task_name=task_name,
-                mne_verbose=mne_verbose,
-            )
-            errors[subj_dir.name] = subj_errors
+        if n_jobs == 1 or not subj_dirs:
+            for subj_dir in tqdm(subj_dirs, disable=not pbar):
+                subj_errors = BIDSdata.convert_subj_data_to_bids(
+                    subj_dir,
+                    eye2bids_exe=eye2bids_exe,
+                    et_meta_path=et_meta_path,
+                    behav_meta_path=behav_meta_path,
+                    bids_root=bids_root,
+                    task_name=task_name,
+                    mne_verbose=mne_verbose,
+                    pbar=pbar,
+                )
+                errors[subj_dir.name] = subj_errors
+        else:
+            max_workers = min(n_jobs, len(subj_dirs))
+            with Manager() as manager:
+                bids_write_lock = manager.Lock()
+                with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(
+                            BIDSdata._convert_subj_data_to_bids_captured,
+                            subj_dir,
+                            eye2bids_exe=eye2bids_exe,
+                            et_meta_path=et_meta_path,
+                            behav_meta_path=behav_meta_path,
+                            bids_root=bids_root,
+                            task_name=task_name,
+                            mne_verbose=mne_verbose,
+                            bids_write_lock=bids_write_lock,
+                        ): subj_dir.name
+                        for subj_dir in subj_dirs
+                    }
+
+                    for future in tqdm(
+                        as_completed(futures),
+                        total=len(futures),
+                        disable=not pbar,
+                        desc="Converting subjects",
+                    ):
+                        subj_name = futures[future]
+                        try:
+                            subj_errors, stdout, stderr = future.result()
+                            errors[subj_name] = subj_errors
+                            if subj_errors:
+                                BIDSdata._write_worker_output(
+                                    subj_name, stdout=stdout, stderr=stderr
+                                )
+                        except Exception as exc:
+                            errors[subj_name] = [(subj_name, "subject", str(exc))]
+                            tqdm.write(
+                                f"An error occurred; Skipping subject conversion for {subj_name}.\n{exc}"
+                            )
 
         BIDSdata.finalize_bids_dataset(
             bids_root=bids_root,
@@ -1615,6 +1729,10 @@ class BIDSdata:
         ``data_dir`` is checked for source EEG, behavioral, eye-tracking, and
         session-info files, then compared against the expected BIDS outputs.
         """
+        logger.info(
+            "Running source-to-BIDS data type mapping validation "
+            f"for {data_dir} -> {bids_root}"
+        )
         rows = []
         subj_dirs = sorted(
             path
@@ -1745,7 +1863,15 @@ class BIDSdata:
             "bids_files",
             "missing_bids",
         ]
-        return pd.DataFrame(rows, columns=columns)
+        report = pd.DataFrame(rows, columns=columns)
+        problem_count = int((report["status"] != "ok").sum()) if not report.empty else 0
+        outcome = "PASSED" if problem_count == 0 else "FAILED"
+        logger.info(
+            f"Data type mapping validation {outcome}: "
+            f"{len(report)} source-backed data type rows checked, "
+            f"{problem_count} non-ok row(s)."
+        )
+        return report
 
     @staticmethod
     def read_bids():

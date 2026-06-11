@@ -75,12 +75,17 @@ def main() -> None:
         task_name=args.task_name,
     )
     problem_rows = report.query("status != 'ok'")
+    outcome = "PASSED" if problem_rows.empty else "FAILED"
 
     summary = (
         report.groupby(["datatype", "status"], dropna=False)
         .size()
         .rename("n")
         .reset_index()
+    )
+    print(
+        f"Data type mapping validation {outcome}: "
+        f"{len(report)} rows checked, {len(problem_rows)} non-ok row(s)."
     )
     print(summary.to_string(index=False))
 
