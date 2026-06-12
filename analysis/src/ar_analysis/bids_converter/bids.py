@@ -16,6 +16,7 @@ import yaml
 import shutil
 import contextlib
 import io
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Manager
 
@@ -1130,6 +1131,48 @@ class BIDSdata:
         BIDSdata._remove_orphan_events_sidecar(et_out_dir, bids_base=bids_base)
 
     @staticmethod
+    def _validate_eye2bids_outputs(
+        et_out_dir: Path,
+        bids_base: str,
+        command: list[str],
+        stdout: str,
+        stderr: str,
+    ) -> None:
+        """Raise if eye2bids did not produce the required BIDS ET files."""
+        required_patterns = {
+            "physio_json": f"{bids_base}*_physio.json",
+            "physio_tsv": f"{bids_base}*_physio.tsv.gz",
+            "physioevents_json": f"{bids_base}*_physioevents.json",
+            "physioevents_tsv": f"{bids_base}*_physioevents.tsv.gz",
+        }
+        missing = [
+            label
+            for label, pattern in required_patterns.items()
+            if not list(et_out_dir.glob(pattern))
+        ]
+        if not missing:
+            return
+
+        produced_files = sorted(path.name for path in et_out_dir.glob("*"))
+        details = "\n".join(
+            part
+            for part in (
+                f"Command: {' '.join(command)}",
+                f"Missing expected outputs: {', '.join(missing)}",
+                f"Output directory: {et_out_dir}",
+                (
+                    f"Files currently in output directory: {', '.join(produced_files)}"
+                    if produced_files
+                    else "Files currently in output directory: <none>"
+                ),
+                f"stdout:\n{stdout.strip()}" if stdout.strip() else "",
+                f"stderr:\n{stderr.strip()}" if stderr.strip() else "",
+            )
+            if part
+        )
+        raise RuntimeError(f"eye2bids did not produce required BIDS ET files:\n{details}")
+
+    @staticmethod
     def _find_eyelink_file(sess_dir: Path) -> Path:
         """Return the single EyeLink EDF file in a raw session directory."""
         et_files = sorted(
@@ -1505,6 +1548,7 @@ class BIDSdata:
                 et_out_dir.mkdir(exist_ok=True, parents=True)
 
                 command = [
+                    sys.executable,
                     str(eye2bids_exe),
                     "--input_file",
                     str(et_file),
@@ -1553,6 +1597,14 @@ class BIDSdata:
                     task_name=task_name,
                     metadata=eye_metadata,
                     session_row=session_row,
+                )
+                bids_base = f"sub-{subj_id}_ses-{sess_id}_task-{task_name}"
+                BIDSdata._validate_eye2bids_outputs(
+                    et_out_dir=et_out_dir,
+                    bids_base=bids_base,
+                    command=command,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
                 )
 
             except Exception as e:
