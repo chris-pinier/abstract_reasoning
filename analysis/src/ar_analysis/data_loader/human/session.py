@@ -1308,6 +1308,47 @@ class HumanSessData(HumanDataClass):
         raw_eog = self.get_raw_eog_data(raw_eeg=raw_eeg)
         return self.preprocess_eog_data(raw_eog, l_freq=l_freq, h_freq=h_freq)
 
+    @staticmethod
+    def _eog_channel_names_for_mode(
+        eog_data: mne.io.Raw,
+        mode: Literal["vertical", "horizontal", "both"],
+    ) -> list[str]:
+        """Return EOG channels for the requested ocular-control signal."""
+        channel_groups = {
+            "horizontal": ["EOGL", "EOGR"],
+            "vertical": ["EOGT", "EOGB"],
+            "both": list(c.EOG_CHANS),
+        }
+        if mode not in channel_groups:
+            raise ValueError("mode must be one of: 'vertical', 'horizontal', 'both'")
+
+        requested_chans = channel_groups[mode]
+        missing_chans = [ch for ch in requested_chans if ch not in eog_data.ch_names]
+        if missing_chans:
+            raise ValueError(
+                f"Missing EOG channels for {mode!r} mode: {missing_chans}"
+            )
+        return requested_chans
+
+    @staticmethod
+    def split_eog_data_into_trials(
+        raw_eog: mne.io.Raw,
+        eeg_trial_bounds: np.ndarray,
+        eeg_events: np.ndarray,
+    ):
+        """Split EOG into the same trial windows used for EEG trial extraction."""
+        manual_eog_trials = []
+        for start, end in eeg_trial_bounds:
+            start_time = (
+                eeg_events[start, 0] / raw_eog.info["sfreq"]
+            ) - c.PRE_TRIAL_TIME
+            end_time = eeg_events[end, 0] / raw_eog.info["sfreq"] + c.POST_TRIAL_TIME
+            manual_eog_trials.append(
+                raw_eog.copy().crop(tmin=start_time, tmax=end_time)
+            )
+
+        return (trial for trial in manual_eog_trials)
+
     def get_eeg_data(self) -> mne.io.Raw:
         raw_eeg = self.get_raw_eeg_data()
 
@@ -2724,6 +2765,9 @@ class HumanSessData(HumanDataClass):
         frp_baseline: tuple[float | None, float | None] | None = None,
         show_plots: bool = True,
         pbar_off=True,
+        eog_trial: mne.io.Raw | None = None,
+        eog_mode: Literal["vertical", "horizontal", "both"] = "both",
+        return_eog: bool = False,
     ):
         """
         Analyze valid stimuli fixations during the trial decision period.
@@ -2743,6 +2787,17 @@ class HumanSessData(HumanDataClass):
             tmin=eeg_crop_start_time,
             tmax=eeg_crop_stop_time,
         )
+        if eog_trial is not None:
+            eog_chans = self._eog_channel_names_for_mode(eog_trial, eog_mode)
+            cropped_eog_trial = eog_trial.copy().pick(eog_chans).crop(
+                tmin=eeg_crop_start_time,
+                tmax=eeg_crop_stop_time,
+            )
+            eog_data = cropped_eog_trial.get_data()
+            eog_info = cropped_eog_trial.info
+        else:
+            eog_data = None
+            eog_info = None
 
         eeg_data = cropped_eeg_trial.get_data()
         eeg_info = cropped_eeg_trial.info
@@ -2790,6 +2845,9 @@ class HumanSessData(HumanDataClass):
             i: [] for i in range(len(stimulus_order))
         }
         eeg_arrays_by_stim: dict[int, list[np.ndarray]] = {
+            i: [] for i in range(len(stimulus_order))
+        }
+        eog_arrays_by_stim: dict[int, list[np.ndarray]] = {
             i: [] for i in range(len(stimulus_order))
         }
         valid_fixation_rows = []
@@ -2847,6 +2905,7 @@ class HumanSessData(HumanDataClass):
             )
             eeg_fixation_stop_sample = eeg_fixation_start_sample + n_epoch_samples
             eeg_epoch_array = None
+            eog_epoch_array = None
 
             if (
                 0 <= eeg_fixation_start_sample
@@ -2855,6 +2914,10 @@ class HumanSessData(HumanDataClass):
                 eeg_epoch_array = eeg_data[
                     :, eeg_fixation_start_sample:eeg_fixation_stop_sample
                 ]
+                if eog_data is not None:
+                    eog_epoch_array = eog_data[
+                        :, eeg_fixation_start_sample:eeg_fixation_stop_sample
+                    ]
             elif fixation_is_valid:
                 logger.warning(
                     "Skipping fixation EEG window beyond trial bounds "
@@ -2866,6 +2929,8 @@ class HumanSessData(HumanDataClass):
             if fixation_is_valid:
                 gaze_traces_by_stim[stim_ind].append(np.array([gaze_x, gaze_y]))
                 eeg_arrays_by_stim[stim_ind].append(eeg_epoch_array)
+                if eog_epoch_array is not None:
+                    eog_arrays_by_stim[stim_ind].append(eog_epoch_array)
                 valid_fixation_rows.append(
                     [
                         stim_ind,
@@ -2898,6 +2963,20 @@ class HumanSessData(HumanDataClass):
         eeg_epochs_by_stim = self._epochs_by_stim(
             eeg_arrays_by_stim, eeg_info, eeg_baseline
         )
+        if eog_info is not None:
+            eog_epochs_by_stim = self._epochs_by_stim(
+                eog_arrays_by_stim, eog_info, eeg_baseline
+            )
+            eog_sequence_erp = self._average_fixation_epochs(
+                eog_epochs_by_stim, sequence_stim_inds
+            )
+            eog_choices_erp = self._average_fixation_epochs(
+                eog_epochs_by_stim, choice_stim_inds
+            )
+        else:
+            eog_epochs_by_stim = {}
+            eog_sequence_erp = None
+            eog_choices_erp = None
         fixations_sequence_erp = self.get_trial_frp(
             eeg_trial=eeg_trial,
             et_trial=et_trial,
@@ -2929,7 +3008,7 @@ class HumanSessData(HumanDataClass):
             fixation_events, trial_N, stim_labels, stimulus_types
         )
 
-        return (
+        result = (
             gaze_traces_by_stim,
             eeg_epochs_by_stim,
             eeg_fixation_pac_data,
@@ -2938,6 +3017,13 @@ class HumanSessData(HumanDataClass):
             fixations_sequence_erp,
             fixations_choices_erp,
         )
+        if return_eog:
+            return result + (
+                eog_epochs_by_stim,
+                eog_sequence_erp,
+                eog_choices_erp,
+            )
+        return result
 
     def analyze_flash_period(self, et_epoch, eeg_epoch, raw_behav, epoch_N):
         raise NotImplementedError
@@ -3175,6 +3261,87 @@ class HumanSessData(HumanDataClass):
 
         # return fixation_data, eeg_fixation_data
 
+    def _build_eog_rsa_outputs(
+        self,
+        eog_evokeds: list[mne.Evoked | None],
+        behav: pd.DataFrame,
+        eog_mode: Literal["vertical", "horizontal", "both"],
+        fixation_scope: Literal["sequence", "choices"],
+        dissimilarity_metric: str,
+        save_dir: Path | None = None,
+    ) -> dict[str, Any]:
+        """Build EOG control datasets/RDMs from trial-level fixation-locked evokeds."""
+        valid_rows = [
+            (trial_ind, evoked)
+            for trial_ind, evoked in enumerate(eog_evokeds)
+            if evoked is not None
+        ]
+        if len(valid_rows) < 2:
+            return {
+                "sequence_lvl": {"dataset": None, "rdm": None},
+                "pattern_lvl": {"dataset": None, "rdm": None},
+            }
+
+        trial_inds = [trial_ind for trial_ind, _ in valid_rows]
+        valid_behav = behav.iloc[trial_inds].reset_index(drop=True)
+        measurements = np.stack(
+            [evoked.get_data().reshape(-1) for _, evoked in valid_rows]
+        )
+
+        base_descriptors = {
+            "id": [self.subj_N],
+            "signal": ["eog"],
+            "eog_mode": [eog_mode],
+            "fixation_scope": [fixation_scope],
+        }
+        sequence_ds_fpath = None
+        sequence_rdm_fpath = None
+        pattern_ds_fpath = None
+        pattern_rdm_fpath = None
+        if save_dir is not None:
+            base_fname = f"eog-{eog_mode}-{fixation_scope}"
+            sequence_ds_fpath = save_dir / f"dataset-{base_fname}-sequence_lvl.hdf5"
+            sequence_rdm_fpath = save_dir / f"rdm-{base_fname}-sequence_lvl.hdf5"
+            pattern_ds_fpath = save_dir / f"dataset-{base_fname}-pattern_lvl.hdf5"
+            pattern_rdm_fpath = save_dir / f"rdm-{base_fname}-pattern_lvl.hdf5"
+
+        ds_seq_lvl, rdm_seq_lvl = get_ds_and_rdm(
+            measurements=measurements,
+            dissimilarity_metric=dissimilarity_metric,
+            ds_fpath=sequence_ds_fpath,
+            rdm_fpath=sequence_rdm_fpath,
+            descriptors=base_descriptors,
+            obs_descriptors={
+                "item_ids": list(valid_behav["item_id"]),
+                "patterns": list(valid_behav["pattern"]),
+                "trial_N": trial_inds,
+            },
+        )
+
+        pattern_measurements = []
+        pattern_labels = []
+        for pattern, group in valid_behav.groupby("pattern", sort=False):
+            pattern_measurements.append(np.nanmean(measurements[group.index], axis=0))
+            pattern_labels.append(pattern)
+
+        if len(pattern_measurements) >= 2:
+            ds_patt_lvl, rdm_patt_lvl = get_ds_and_rdm(
+                measurements=np.stack(pattern_measurements),
+                dissimilarity_metric=dissimilarity_metric,
+                ds_fpath=pattern_ds_fpath,
+                rdm_fpath=pattern_rdm_fpath,
+                descriptors=base_descriptors,
+                obs_descriptors={"patterns": pattern_labels},
+            )
+        else:
+            ds_patt_lvl = None
+            rdm_patt_lvl = None
+
+        return {
+            "sequence_lvl": {"dataset": ds_seq_lvl, "rdm": rdm_seq_lvl},
+            "pattern_lvl": {"dataset": ds_patt_lvl, "rdm": rdm_patt_lvl},
+        }
+
     def analyze_session(
         self,
         save_dir: Path | None = None,
@@ -3185,6 +3352,9 @@ class HumanSessData(HumanDataClass):
         pbar: bool = True,
         trial_pbar: Any | None = None,
         frp_baseline: tuple[float | None, float | None] | None = None,
+        include_eog_rdm: bool = False,
+        eog_mode: Literal["vertical", "horizontal", "both"] = "both",
+        eog_dissimilarity_metric: str = "correlation",
     ):
         """ """
         # # ! TEMP: DEBUG
@@ -3259,18 +3429,37 @@ class HumanSessData(HumanDataClass):
 
         (
             manual_eeg_trials,
+            eeg_trial_bounds,
+            eeg_events,
             *_,
             # eeg_trial_bounds,
             # eeg_events,
             # eeg_events_df,
         ) = self.split_eeg_data_into_trials(eeg, behav)
 
+        if include_eog_rdm:
+            raw_eog = self.get_eog_data(
+                raw_eeg=self.get_raw_eeg_data(
+                    preload=False,
+                    bad_chans=bad_chans,
+                )
+            )
+            manual_eog_trials = self.split_eog_data_into_trials(
+                raw_eog=raw_eog,
+                eeg_trial_bounds=eeg_trial_bounds,
+                eeg_events=eeg_events,
+            )
+        else:
+            manual_eog_trials = None
+
         bad_chans = eeg.info["bads"]
 
         # * Initialize data containers
         sess_frps: Dict[str, List] = {"sequence": [], "choices": []}
+        sess_eog_frps: Dict[str, List] = {"sequence": [], "choices": []}
         gaze_fixation_traces_all = []
         eeg_fixation_epochs_all = []
+        eog_fixation_epochs_all = []
         stim_fixation_summary_all = []
         fixation_events_all = []
         eeg_fixation_pac_data_all = []
@@ -3289,16 +3478,11 @@ class HumanSessData(HumanDataClass):
             # * Get the EEG and ET data for the current trial
             eeg_trial = next(manual_eeg_trials)
             et_trial = next(manual_et_trials)
+            eog_trial = (
+                next(manual_eog_trials) if manual_eog_trials is not None else None
+            )
 
-            (
-                gaze_fixation_traces,
-                eeg_fixation_epochs,
-                eeg_fixation_pac_data,
-                fixation_events,
-                stim_fixation_summary,
-                fixations_sequence_erp,
-                fixations_choices_erp,
-            ) = self.analyze_trial_decision_period(
+            trial_analysis = self.analyze_trial_decision_period(
                 eeg_trial,
                 et_trial,
                 behav,
@@ -3307,12 +3491,40 @@ class HumanSessData(HumanDataClass):
                 eeg_window=c.FRP_WINDOW,
                 frp_baseline=frp_baseline,
                 show_plots=False,
+                eog_trial=eog_trial,
+                eog_mode=eog_mode,
+                return_eog=include_eog_rdm,
             )
+            (
+                gaze_fixation_traces,
+                eeg_fixation_epochs,
+                eeg_fixation_pac_data,
+                fixation_events,
+                stim_fixation_summary,
+                fixations_sequence_erp,
+                fixations_choices_erp,
+                *eog_results,
+            ) = trial_analysis
+            if include_eog_rdm:
+                (
+                    eog_fixation_epochs,
+                    eog_sequence_erp,
+                    eog_choices_erp,
+                ) = eog_results
+            else:
+                eog_fixation_epochs = {}
+                eog_sequence_erp = None
+                eog_choices_erp = None
 
             sess_frps["sequence"].append(fixations_sequence_erp)
             sess_frps["choices"].append(fixations_choices_erp)
+            if include_eog_rdm:
+                sess_eog_frps["sequence"].append(eog_sequence_erp)
+                sess_eog_frps["choices"].append(eog_choices_erp)
             gaze_fixation_traces_all.append(gaze_fixation_traces)
             eeg_fixation_epochs_all.append(eeg_fixation_epochs)
+            if include_eog_rdm:
+                eog_fixation_epochs_all.append(eog_fixation_epochs)
             stim_fixation_summary_all.append(stim_fixation_summary)
             fixation_events_all.append(fixation_events)
             eeg_fixation_pac_data_all.append(eeg_fixation_pac_data)
@@ -3366,14 +3578,34 @@ class HumanSessData(HumanDataClass):
             n_seq_frps=len(sess_frps["sequence"]) - sess_frps["sequence"].count(None),
             n_choices_frps=len(sess_frps["choices"]) - sess_frps["choices"].count(None),
         )
+        eog_rsa_outputs = {}
+        if include_eog_rdm:
+            eog_rsa_outputs = {
+                scope: self._build_eog_rsa_outputs(
+                    eog_evokeds=evokeds,
+                    behav=behav,
+                    eog_mode=eog_mode,
+                    fixation_scope=scope,
+                    dissimilarity_metric=eog_dissimilarity_metric,
+                    save_dir=save_dir if should_save else None,
+                )
+                for scope, evokeds in sess_eog_frps.items()
+            }
 
         if should_save:
             # * Save the data to pickle files
             pd.DataFrame([valid_frps]).to_csv(save_dir / "valid_frps.csv", index=False)
 
             save_pickle(sess_frps, save_dir / "sess_frps.pkl")
+            if include_eog_rdm:
+                save_pickle(sess_eog_frps, save_dir / f"sess_eog_frps-{eog_mode}.pkl")
             save_pickle(gaze_fixation_traces_all, save_dir / "gaze_fixation_traces.pkl")
             save_pickle(eeg_fixation_epochs_all, save_dir / "eeg_fixation_epochs.pkl")
+            if include_eog_rdm:
+                save_pickle(
+                    eog_fixation_epochs_all,
+                    save_dir / f"eog_fixation_epochs-{eog_mode}.pkl",
+                )
             stim_fixation_summary.to_parquet(
                 save_dir / "stim_fixation_summary.parquet", index=False
             )
@@ -3392,6 +3624,9 @@ class HumanSessData(HumanDataClass):
             "fixation_events": fixation_events,
             "gaze_info": stim_fixation_summary,
             "gaze_target_fixation_sequence": fixation_events,
+            "sess_eog_frps": sess_eog_frps,
+            "eog_fixation_epochs": eog_fixation_epochs_all,
+            "eog_rsa": eog_rsa_outputs,
         }
 
     def get_frp(self):
