@@ -1130,6 +1130,23 @@ class BIDSdata:
         BIDSdata._remove_orphan_events_sidecar(et_out_dir, bids_base=bids_base)
 
     @staticmethod
+    def _find_eyelink_file(sess_dir: Path) -> Path:
+        """Return the single EyeLink EDF file in a raw session directory."""
+        et_files = sorted(
+            path
+            for path in list_contents(sess_dir, incl="file", recurs=False)
+            if path.suffix.lower() == ".edf"
+        )
+        if not et_files:
+            raise FileNotFoundError(f"No EyeLink EDF file found in {sess_dir}")
+        if len(et_files) > 1:
+            raise ValueError(
+                "Multiple EyeLink EDF files found in "
+                f"{sess_dir}: {', '.join(str(path) for path in et_files)}"
+            )
+        return et_files[0]
+
+    @staticmethod
     def _read_bids_session_rows(
         bids_root: Path,
     ) -> dict[tuple[str, str], dict[str, Any]]:
@@ -1476,7 +1493,7 @@ class BIDSdata:
             # * Eye Tracking
             # * ########################################################################
             try:
-                et_file = list_contents(sess_dir, reg=r".+\.EDF$")[0]
+                et_file = BIDSdata._find_eyelink_file(sess_dir)
 
                 # Eye tracking is stored as physio data alongside the associated EEG recording.
                 et_out_dir = (
@@ -1503,7 +1520,18 @@ class BIDSdata:
 
                 if not is_success:
                     # If the command failed, log it and manually trigger the except block
-                    raise RuntimeError(f"eye2bids failed: {result.stderr}")
+                    stdout = result.stdout.strip()
+                    stderr = result.stderr.strip()
+                    details = "\n".join(
+                        part
+                        for part in (
+                            f"Command: {' '.join(command)}",
+                            f"stdout:\n{stdout}" if stdout else "",
+                            f"stderr:\n{stderr}" if stderr else "",
+                        )
+                        if part
+                    )
+                    raise RuntimeError(f"eye2bids failed:\n{details}")
 
                 tqdm.write(
                     f"Successfully converted ET data for subj_{subj_id} "
@@ -1623,6 +1651,7 @@ class BIDSdata:
             )
 
         subj_dirs = list_contents(data_dir, reg="subj.+", recurs=False)
+        logger.info(f"Using eye2bids executable: {eye2bids_exe}")
         BIDSdata._prepare_bids_root(bids_root=bids_root, task_name=task_name)
 
         errors = {}
