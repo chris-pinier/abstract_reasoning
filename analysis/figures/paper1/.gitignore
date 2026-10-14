@@ -1,0 +1,3 @@
+# Preserve historical scripts despite the repository-wide archive/ rule.
+!/redesign/archive/
+!/redesign/archive/**

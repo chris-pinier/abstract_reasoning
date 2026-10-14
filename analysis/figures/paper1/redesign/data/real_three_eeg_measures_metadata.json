@@ -1,0 +1,16 @@
+{
+  "subject": 1,
+  "session": 1,
+  "trial_index": 0,
+  "channel": "Fz",
+  "raw_source": "/Volumes/Realtek 1Tb/PhD Data/experiment1/data/Lab/raw-BIDS/derivatives/preprocessed/sub-01_ses-01_task-AbsPattComp_prepro-eeg-raw.fif",
+  "events_source": "/Volumes/Realtek 1Tb/PhD Data/experiment1/data/Lab/raw-BIDS/sub-01/ses-01/eeg/sub-01_ses-01_task-AbsPattComp_events.tsv",
+  "trial_start_raw_index": 159989,
+  "response_raw_index": 190866,
+  "response_event": "l",
+  "first_fixation_raw_index": 181249,
+  "baseline": null,
+  "window": "-600 ms to 0 ms, 1230 samples at 2048 Hz (sample rounding follows analysis convention)",
+  "FRP_source": "/Users/chris/Documents/PhD-Local/abstract_reasoning/paper/Paper1-LLM_and_Human_Abs_Reasoning/.temp/tmp_redesign_2026-09-30/data/real_figure_examples.npz",
+  "validation": "First fixation epoch matches continuous raw EEG exactly; event markers bracket that same recorded trial."
+}

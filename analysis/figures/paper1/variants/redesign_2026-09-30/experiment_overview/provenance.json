@@ -1,0 +1,13 @@
+{
+  "inputs": [
+    "../data/behavior_profile_comparison.csv",
+    "../data/matched_rsa.csv",
+    "../data/layers.csv",
+    "../data/selected_layers.csv",
+    "../model_palette.json",
+    "../../trial_example2.png"
+  ],
+  "behavior_r_column": "original_profile_r",
+  "EEG_dataset": "matched 24 participants, 96 complete sessions",
+  "design": "five-panel narrative overview"
+}

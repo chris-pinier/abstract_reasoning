@@ -1,0 +1,9 @@
+FRP extraction and processing. Continuous EEG is initially average-referenced excluding flagged bad electrodes, notch-filtered at 50-Hz multiples from 50 to 250 Hz, cleaned with extended Infomax ICA fitted to a 1–100 Hz copy (only ICLabel brain components retained), band-pass filtered at 0.1–100 Hz, interpolated at bad channels, and average-referenced again. Eye-tracker-labeled fixations during the decision phase are assigned by mean gaze position to stimulus bounding boxes. Retained sequence fixations last at least 100 ms; response-option fixations do not contribute to sequence FRPs. EEG is cropped from fixation onset through 600 ms without baseline correction. These windows can extend beyond the fixation and overlap one another. All retained sequence-fixation epochs are equally averaged within trial, yielding a multichannel trial FRP; trials without valid epochs have no FRP. Regional electrode averages yield time-course features. Within each session, trials are averaged within each of eight patterns, then pairwise correlation distances form a session RDM. Session RDMs are averaged within participant; participant RDMs are averaged equally at group level. All waveforms, gaze markers and timing are schematic.
+
+Sources:
+04-methods.tex: EEG preprocessing and RSA sections.
+abstract_reasoning/analysis/src/ar_analysis/analysis_config.py: MIN_FIXATION_DURATION = 0.1.
+abstract_reasoning/analysis/src/ar_analysis/data_loader/human_data.py: analyze_trial epoch extraction and within-trial concatenation/average (around lines 2780–2930).
+abstract_reasoning/analysis/scripts/frp_hierarchical_rdm.py: load_trial_frp_features validates baseline=None, non-negative onset, 600-ms coverage, and regional channel averaging.
+
+The >=100-ms inclusion threshold is explicit in the current code but absent from the current methods prose; consider adding it when finalizing the manuscript. This infographic has not been inserted into the paper.

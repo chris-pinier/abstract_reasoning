@@ -1,0 +1,14 @@
+[
+  {
+    "name": "06b_matched_rsa_grouped_bars",
+    "note": "Same cell values as 06_matched_rsa_heatmap. Bars group the three EEG conditions within each regional category. Regional mean is separated and shaded. No standard errors or confidence intervals have been added."
+  },
+  {
+    "name": "07b_model_rsa_combined",
+    "note": "Single shared axis, model categories, three vertically offset conditions in consistent EEG colors. Each condition retains all five regional points, the frontal diamond and an open square for the mean. Values unchanged from 07_model_rsa_regions."
+  },
+  {
+    "name": "03e_accuracy_profile_rank_clean",
+    "note": "Original Figure 3C values and ranks preserved. Each model appears once on the left, colored to match its line. Endpoint circles display ranks; left percentages and right correlations retain actual values. The near-tie between Phi-4 and DeepSeek is explicitly noted."
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "source": "/Users/chris/Documents/PhD-Local/abstract_reasoning/other/final_analysis-primary_regions/hierarchical_rdm/primary_regions-frp/hierarchical_frp_rdm_results.pickle",
+  "subject": 1,
+  "session": 1,
+  "region": "frontal",
+  "units": "microvolts",
+  "aggregation": "Regional electrode average, then trial average within pattern and session.",
+  "validation": "Correlation distances reproduce the stored session RDM."
+}
